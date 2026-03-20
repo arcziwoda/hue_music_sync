@@ -1,0 +1,1173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HUE VISUALIZER</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --bg: #080808;
+  --bg-elevated: #0c0c0c;
+  --border: rgba(255, 255, 255, 0.10);
+  --border-strong: rgba(255, 255, 255, 0.18);
+  --text: #ffffff;
+  --text-dim: rgba(255, 255, 255, 0.35);
+  --text-mid: rgba(255, 255, 255, 0.55);
+  --accent: #00ffcc;
+  --accent-dim: rgba(0, 255, 204, 0.15);
+}
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'IBM Plex Mono', monospace;
+  font-weight: 400;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Noise grain overlay */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  pointer-events: none;
+  opacity: 0.035;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 512 512' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 256px 256px;
+}
+
+/* Scanlines */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 3px,
+    rgba(0, 0, 0, 0.06) 3px,
+    rgba(0, 0, 0, 0.06) 4px
+  );
+}
+
+/* Layout */
+.container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  border: 1px solid var(--border-strong);
+}
+
+/* Header */
+.header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  padding: 20px 28px 16px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.title-main {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 52px;
+  line-height: 0.85;
+  letter-spacing: 0.15em;
+  color: var(--text);
+}
+
+.title-sub {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 22px;
+  letter-spacing: 0.45em;
+  color: var(--text-mid);
+  margin-top: 2px;
+}
+
+.header-right {
+  display: flex;
+  align-items: flex-end;
+  gap: 32px;
+}
+
+.status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  color: var(--text-dim);
+  text-transform: uppercase;
+}
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  background: var(--text-dim);
+  transition: background 0.3s;
+}
+
+.status.connected .status-dot { background: var(--accent); }
+.status.connected .status-text { color: var(--text-mid); }
+
+.bpm-block {
+  text-align: right;
+}
+
+.bpm-value {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 48px;
+  line-height: 0.85;
+  letter-spacing: 0.05em;
+  color: var(--text);
+  transition: opacity 0.15s, color 0.1s;
+}
+
+.bpm-label {
+  font-size: 10px;
+  letter-spacing: 0.3em;
+  color: var(--text-dim);
+  display: block;
+  text-align: right;
+  margin-top: 2px;
+}
+
+/* Visualization sections */
+.spectrum-section {
+  position: relative;
+  height: 16vh;
+  min-height: 80px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.spectrum-section canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.bands-section {
+  position: relative;
+  flex: 1;
+  min-height: 140px;
+  border-bottom: 1px solid var(--border);
+  background-image:
+    linear-gradient(rgba(255,255,255,0.018) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.018) 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+
+.bands-section canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* Beat flash overlay */
+.beat-overlay {
+  position: fixed;
+  inset: 0;
+  background: white;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 100;
+  transition: none;
+}
+
+/* Light preview */
+.light-preview {
+  display: flex;
+  align-items: center;
+  height: 52px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+  padding: 0 28px;
+  gap: 0;
+}
+
+.light-preview-label {
+  font-size: 9px;
+  letter-spacing: 0.25em;
+  color: var(--text-dim);
+  flex-shrink: 0;
+  width: 52px;
+}
+
+.light-dots {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  justify-content: center;
+}
+
+.light-dot {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #111;
+  border: 1px solid var(--border);
+  transition: box-shadow 0.1s;
+}
+
+.light-status {
+  font-size: 9px;
+  letter-spacing: 0.15em;
+  color: var(--text-dim);
+  flex-shrink: 0;
+  text-align: right;
+  width: 80px;
+}
+
+.light-status.active { color: var(--accent); }
+
+/* Meters bar */
+.meters {
+  display: flex;
+  align-items: center;
+  height: 44px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+  padding: 0 28px;
+  gap: 1px;
+}
+
+.meter {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  padding: 0 16px;
+}
+
+.meter:first-child { padding-left: 0; }
+.meter + .meter { border-left: 1px solid var(--border); }
+
+.meter-label {
+  font-size: 9px;
+  letter-spacing: 0.25em;
+  color: var(--text-dim);
+  flex-shrink: 0;
+  width: 44px;
+}
+
+.meter-track {
+  flex: 1;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.06);
+  position: relative;
+}
+
+.meter-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  width: 0%;
+  background: var(--text);
+  transition: width 0.06s linear;
+}
+
+.meter-fill.accent { background: var(--accent); }
+
+.meter-value {
+  font-size: 10px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  width: 36px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+/* Controls */
+.controls-row {
+  display: flex;
+  align-items: center;
+  height: 48px;
+  flex-shrink: 0;
+  padding: 0 28px;
+  border-bottom: 1px solid var(--border);
+}
+
+.controls-row:last-child { border-bottom: none; }
+
+.control {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  padding: 0 16px;
+}
+
+.control:first-child { padding-left: 0; }
+.control + .control { border-left: 1px solid var(--border); }
+
+.control label {
+  font-size: 9px;
+  letter-spacing: 0.2em;
+  color: var(--text-dim);
+  flex-shrink: 0;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.control input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  flex: 1;
+  height: 2px;
+  background: rgba(255, 255, 255, 0.12);
+  outline: none;
+  cursor: pointer;
+}
+
+.control input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 10px;
+  height: 10px;
+  background: var(--text);
+  border: none;
+  border-radius: 0;
+  cursor: pointer;
+}
+
+.control input[type="range"]::-moz-range-thumb {
+  width: 10px;
+  height: 10px;
+  background: var(--text);
+  border: none;
+  border-radius: 0;
+  cursor: pointer;
+}
+
+.control input[type="range"]::-webkit-slider-thumb:hover {
+  background: var(--accent);
+}
+
+.control input[type="range"]::-moz-range-thumb:hover {
+  background: var(--accent);
+}
+
+.control-val {
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-mid);
+  width: 38px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+/* Button group (for spatial mode / genre preset) */
+.btn-group {
+  display: flex;
+  gap: 4px;
+  flex: 1;
+}
+
+.btn-group button {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  padding: 4px 10px;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.btn-group button:hover {
+  border-color: var(--text-mid);
+  color: var(--text-mid);
+}
+
+.btn-group button.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-dim);
+}
+
+/* Beat pulse on BPM */
+.bpm-value.pulse {
+  color: var(--accent);
+}
+
+/* Section labels */
+.section-label {
+  position: absolute;
+  top: 8px;
+  left: 12px;
+  font-size: 8px;
+  letter-spacing: 0.3em;
+  color: var(--text-dim);
+  z-index: 2;
+  pointer-events: none;
+  text-transform: uppercase;
+}
+
+/* Decorative corner marks */
+.corner-mark {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border-color: var(--border-strong);
+  border-style: solid;
+  pointer-events: none;
+  z-index: 2;
+}
+.corner-mark.tl { top: 6px; left: 6px; border-width: 1px 0 0 1px; }
+.corner-mark.tr { top: 6px; right: 6px; border-width: 1px 1px 0 0; }
+.corner-mark.bl { bottom: 6px; left: 6px; border-width: 0 0 1px 1px; }
+.corner-mark.br { bottom: 6px; right: 6px; border-width: 0 1px 1px 0; }
+</style>
+</head>
+<body>
+
+<div class="beat-overlay" id="beatOverlay"></div>
+
+<div class="container">
+  <header class="header">
+    <div class="title-block">
+      <div class="title-main">HUE</div>
+      <div class="title-sub">VISUALIZER</div>
+    </div>
+    <div class="header-right">
+      <div class="status" id="status">
+        <span class="status-dot"></span>
+        <span class="status-text">CONNECTING</span>
+      </div>
+      <div class="bpm-block">
+        <span class="bpm-value" id="bpmValue">---</span>
+        <span class="bpm-label">BPM</span>
+      </div>
+    </div>
+  </header>
+
+  <section class="spectrum-section">
+    <span class="section-label">SPECTRUM</span>
+    <div class="corner-mark tl"></div>
+    <div class="corner-mark tr"></div>
+    <canvas id="spectrumCanvas"></canvas>
+  </section>
+
+  <section class="bands-section">
+    <span class="section-label">FREQUENCY BANDS</span>
+    <div class="corner-mark tl"></div>
+    <div class="corner-mark tr"></div>
+    <div class="corner-mark bl"></div>
+    <div class="corner-mark br"></div>
+    <canvas id="bandsCanvas"></canvas>
+  </section>
+
+  <section class="light-preview">
+    <span class="light-preview-label">LIGHTS</span>
+    <div class="light-dots" id="lightDots"></div>
+    <span class="light-status" id="lightStatus">PREVIEW</span>
+  </section>
+
+  <section class="meters">
+    <div class="meter">
+      <span class="meter-label">LEVEL</span>
+      <div class="meter-track"><div class="meter-fill" id="levelFill"></div></div>
+      <span class="meter-value" id="levelVal">0.00</span>
+    </div>
+    <div class="meter">
+      <span class="meter-label">BEAT</span>
+      <div class="meter-track"><div class="meter-fill accent" id="beatFill"></div></div>
+      <span class="meter-value" id="beatVal">0.00</span>
+    </div>
+    <div class="meter">
+      <span class="meter-label">CENT</span>
+      <div class="meter-track"><div class="meter-fill" id="centroidFill"></div></div>
+      <span class="meter-value" id="centroidVal">0</span>
+    </div>
+  </section>
+
+  <section class="controls-row">
+    <div class="control">
+      <label>SENSITIVITY</label>
+      <input type="range" id="ctrlSensitivity" min="10" max="30" value="14" step="1">
+      <span class="control-val" id="valSensitivity">1.4</span>
+    </div>
+    <div class="control">
+      <label>BASS BOOST</label>
+      <input type="range" id="ctrlBassBoost" min="10" max="50" value="20" step="1">
+      <span class="control-val" id="valBassBoost">2.0</span>
+    </div>
+    <div class="control">
+      <label>COOLDOWN</label>
+      <input type="range" id="ctrlCooldown" min="50" max="1000" value="300" step="10">
+      <span class="control-val" id="valCooldown">300</span>
+    </div>
+  </section>
+
+  <section class="controls-row">
+    <div class="control">
+      <label>SPATIAL</label>
+      <div class="btn-group" id="spatialBtns">
+        <button data-mode="uniform">UNI</button>
+        <button data-mode="frequency_zones" class="active">FREQ</button>
+        <button data-mode="wave">WAVE</button>
+        <button data-mode="mirror">MIRROR</button>
+        <button data-mode="chase">CHASE</button>
+      </div>
+    </div>
+    <div class="control">
+      <label>GENRE</label>
+      <div class="btn-group" id="genreBtns">
+        <button data-genre="techno" class="active">TECHNO</button>
+        <button data-genre="house">HOUSE</button>
+        <button data-genre="dnb">DNB</button>
+        <button data-genre="ambient">AMBIENT</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="controls-row">
+    <div class="control">
+      <label>INTENSITY</label>
+      <div class="btn-group" id="intensityBtns">
+        <button data-intensity="intense">INTENSE</button>
+        <button data-intensity="normal" class="active">NORMAL</button>
+        <button data-intensity="chill">CHILL</button>
+      </div>
+    </div>
+    <div class="control">
+      <label>FX SIZE</label>
+      <div class="btn-group" id="effectsSizeBtns">
+        <button data-fxsize="1L">1L</button>
+        <button data-fxsize="25%">25%</button>
+        <button data-fxsize="50%">50%</button>
+        <button data-fxsize="ALL" class="active">ALL</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="controls-row">
+    <div class="control">
+      <label>COLOR</label>
+      <div class="btn-group" id="colorModeBtns">
+        <button data-mode="palette" class="active">PALETTE</button>
+        <button data-mode="centroid">CENTROID</button>
+      </div>
+    </div>
+    <div class="control">
+      <label>PALETTE</label>
+      <div class="btn-group" id="paletteBtns">
+        <button data-palette="neon">NEON</button>
+        <button data-palette="warm">WARM</button>
+        <button data-palette="cool">COOL</button>
+        <button data-palette="fire">FIRE</button>
+        <button data-palette="forest">FOREST</button>
+        <button data-palette="ocean">OCEAN</button>
+        <button data-palette="sunset">SUNSET</button>
+        <button data-palette="monochrome">MONO</button>
+        <button data-palette="techno">TECHNO</button>
+        <button data-palette="house">HOUSE</button>
+        <button data-palette="dnb">DNB</button>
+        <button data-palette="ambient">AMBIENT</button>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+/* ================================================================
+   HUE VISUALIZER — Dark Industrial Techno Control Panel
+   WebSocket-driven real-time audio visualization
+   ================================================================ */
+
+// State
+var S = {
+  spectrum: new Float32Array(64),
+  bands: new Float32Array(7),
+  rms: 0,
+  peak: 0,
+  beatStrength: 0,
+  centroid: 0,
+  bpm: 0,
+  bpmConfidence: 0,
+  sSpectrum: new Float32Array(64),
+  sBands: new Float32Array(7),
+  sRms: 0,
+  sBeatStrength: 0,
+  sCentroid: 0,
+  flash: 0,
+  connected: false,
+  lightPreview: [],
+  lightsActive: false,
+  spatialMode: 'frequency_zones'
+};
+
+var ATTACK = 0.45;
+var RELEASE = 0.07;
+var BAND_LABELS = ['SUB', 'BASS', 'LMID', 'MID', 'UMID', 'PRE', 'BRI'];
+
+function ema(cur, tgt) {
+  var a = tgt > cur ? ATTACK : RELEASE;
+  return cur + a * (tgt - cur);
+}
+
+// DOM refs
+var $spectrumCanvas = document.getElementById('spectrumCanvas');
+var $bandsCanvas = document.getElementById('bandsCanvas');
+var $beatOverlay = document.getElementById('beatOverlay');
+var $status = document.getElementById('status');
+var $bpmValue = document.getElementById('bpmValue');
+var $levelFill = document.getElementById('levelFill');
+var $levelVal = document.getElementById('levelVal');
+var $beatFill = document.getElementById('beatFill');
+var $beatVal = document.getElementById('beatVal');
+var $centroidFill = document.getElementById('centroidFill');
+var $centroidVal = document.getElementById('centroidVal');
+var $lightDots = document.getElementById('lightDots');
+var $lightStatus = document.getElementById('lightStatus');
+
+var specCtx, bandCtx;
+var specW, specH, bandW, bandH;
+
+// Canvas setup with DPI scaling
+function setupCanvas(canvas) {
+  var dpr = window.devicePixelRatio || 1;
+  var rect = canvas.parentElement.getBoundingClientRect();
+  canvas.width = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+  canvas.style.width = rect.width + 'px';
+  canvas.style.height = rect.height + 'px';
+  var ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  return { ctx: ctx, w: rect.width, h: rect.height };
+}
+
+function initCanvases() {
+  var s = setupCanvas($spectrumCanvas);
+  specCtx = s.ctx; specW = s.w; specH = s.h;
+  var b = setupCanvas($bandsCanvas);
+  bandCtx = b.ctx; bandW = b.w; bandH = b.h;
+}
+
+// WebSocket
+var ws = null;
+var reconnectDelay = 500;
+
+function connect() {
+  var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  ws = new WebSocket(proto + '//' + location.host + '/ws');
+
+  ws.onopen = function() {
+    S.connected = true;
+    reconnectDelay = 500;
+    _uiSynced = false;  // Reset so sliders sync on first message (B.10)
+    $status.classList.add('connected');
+    $status.querySelector('.status-text').textContent = 'CONNECTED';
+  };
+
+  ws.onmessage = function(e) {
+    try {
+      var d = JSON.parse(e.data);
+    } catch (err) {
+      console.error('WS message parse error:', err);
+      return;
+    }
+    if (d.type !== 'audio') return;
+
+    for (var i = 0; i < 64; i++) S.spectrum[i] = d.spectrum[i] || 0;
+    for (var i = 0; i < 7; i++) S.bands[i] = d.bands[i] || 0;
+
+    S.rms = d.rms;
+    S.peak = d.peak;
+    S.centroid = d.spectral_centroid;
+
+    if (d.beat.is_beat) {
+      S.flash = 1.0;
+      S.beatStrength = Math.max(d.beat.strength, 0.5);
+    }
+
+    S.bpm = d.beat.bpm;
+    S.bpmConfidence = d.beat.confidence;
+
+    // Light preview data
+    if (d.light_preview) {
+      S.lightPreview = d.light_preview;
+      S.lightsActive = !!d.lights_active;
+    }
+    if (d.spatial_mode) {
+      S.spatialMode = d.spatial_mode;
+    }
+
+    // Sync UI controls to server state (B.10)
+    syncUIState(d);
+  };
+
+  ws.onclose = function() {
+    S.connected = false;
+    $status.classList.remove('connected');
+    $status.querySelector('.status-text').textContent = 'RECONNECTING';
+    setTimeout(connect, reconnectDelay);
+    reconnectDelay = Math.min(reconnectDelay * 1.5, 5000);
+  };
+
+  ws.onerror = function() { ws.close(); };
+}
+
+function send(type, value) {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: type, value: value }));
+  }
+}
+
+// Sync UI controls to server state (B.10)
+var _uiSynced = false;
+
+function syncUIState(d) {
+  // Sync on every message for button groups (server may change state),
+  // but sliders only on first message after (re)connect to avoid fighting user input
+  if (d.spatial_mode) {
+    var spatialBtns = document.querySelectorAll('#spatialBtns button');
+    spatialBtns.forEach(function(b) {
+      b.classList.toggle('active', b.dataset.mode === d.spatial_mode);
+    });
+  }
+  if (d.genre) {
+    var genreBtns = document.querySelectorAll('#genreBtns button');
+    genreBtns.forEach(function(b) {
+      b.classList.toggle('active', b.dataset.genre === d.genre);
+    });
+  }
+  if (d.palette) {
+    var paletteBtns = document.querySelectorAll('#paletteBtns button');
+    paletteBtns.forEach(function(b) {
+      b.classList.toggle('active', b.dataset.palette === d.palette);
+    });
+  }
+  if (d.color_mode) {
+    var colorModeBtns = document.querySelectorAll('#colorModeBtns button');
+    colorModeBtns.forEach(function(b) {
+      b.classList.toggle('active', b.dataset.mode === d.color_mode);
+    });
+  }
+  if (d.intensity_level) {
+    var intensityBtns = document.querySelectorAll('#intensityBtns button');
+    intensityBtns.forEach(function(b) {
+      b.classList.toggle('active', b.dataset.intensity === d.intensity_level);
+    });
+  }
+  if (typeof d.effects_size === 'number') {
+    // Map effects_size back to button label for highlighting
+    var fxBtns = document.querySelectorAll('#effectsSizeBtns button');
+    var numLights = d.light_preview ? d.light_preview.length : 6;
+    var singleLight = numLights > 0 ? 1.0 / numLights : 0.17;
+    fxBtns.forEach(function(b) {
+      var label = b.dataset.fxsize;
+      var matches = false;
+      if (label === 'ALL') matches = d.effects_size >= 0.99;
+      else if (label === '50%') matches = Math.abs(d.effects_size - 0.5) < 0.05;
+      else if (label === '25%') matches = Math.abs(d.effects_size - 0.25) < 0.05;
+      else if (label === '1L') matches = d.effects_size <= singleLight + 0.01;
+      b.classList.toggle('active', matches);
+    });
+  }
+
+  // Sync sliders only once per connection to avoid overriding user dragging
+  if (!_uiSynced) {
+    _uiSynced = true;
+    if (typeof d.sensitivity === 'number') {
+      var $sens = document.getElementById('ctrlSensitivity');
+      var $sensV = document.getElementById('valSensitivity');
+      $sens.value = Math.round(d.sensitivity * 10);
+      $sensV.textContent = d.sensitivity.toFixed(1);
+    }
+    if (typeof d.bass_boost === 'number') {
+      var $bass = document.getElementById('ctrlBassBoost');
+      var $bassV = document.getElementById('valBassBoost');
+      $bass.value = Math.round(d.bass_boost * 10);
+      $bassV.textContent = d.bass_boost.toFixed(1);
+    }
+    if (typeof d.cooldown_ms === 'number') {
+      var $cd = document.getElementById('ctrlCooldown');
+      var $cdV = document.getElementById('valCooldown');
+      $cd.value = d.cooldown_ms;
+      $cdV.textContent = Math.round(d.cooldown_ms).toString();
+    }
+  }
+}
+
+// Drawing: spectrum curve
+function drawSpectrum() {
+  var ctx = specCtx;
+  var w = specW;
+  var h = specH;
+  ctx.clearRect(0, 0, w, h);
+
+  var data = S.sSpectrum;
+  var n = data.length;
+  var pad = 28;
+  var dw = w - pad * 2;
+
+  // Thin horizontal reference lines
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.03)';
+  ctx.lineWidth = 1;
+  for (var k = 1; k <= 3; k++) {
+    var ly = h * (k / 4);
+    ctx.beginPath();
+    ctx.moveTo(pad, ly);
+    ctx.lineTo(pad + dw, ly);
+    ctx.stroke();
+  }
+
+  // Build smooth curve
+  var prevX = pad;
+  var prevY = h;
+
+  // Fill path
+  ctx.beginPath();
+  ctx.moveTo(pad, h);
+
+  for (var i = 0; i < n; i++) {
+    var x = pad + (i / (n - 1)) * dw;
+    var y = h - data[i] * h * 0.92;
+    if (i === 0) {
+      ctx.lineTo(x, y);
+    } else {
+      var cpx = (prevX + x) / 2;
+      var cpy = (prevY + y) / 2;
+      ctx.quadraticCurveTo(prevX, prevY, cpx, cpy);
+    }
+    prevX = x;
+    prevY = y;
+  }
+  ctx.lineTo(pad + dw, h);
+  ctx.closePath();
+
+  var grad = ctx.createLinearGradient(0, 0, 0, h);
+  grad.addColorStop(0, 'rgba(0, 255, 204, 0.18)');
+  grad.addColorStop(0.4, 'rgba(0, 255, 204, 0.06)');
+  grad.addColorStop(1, 'rgba(0, 255, 204, 0)');
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  // Stroke with glow
+  ctx.save();
+  ctx.shadowColor = '#00ffcc';
+  ctx.shadowBlur = 6;
+  ctx.strokeStyle = 'rgba(0, 255, 204, 0.55)';
+  ctx.lineWidth = 1.2;
+
+  ctx.beginPath();
+  ctx.moveTo(pad, h);
+  prevX = pad;
+  prevY = h;
+  for (var i = 0; i < n; i++) {
+    var x = pad + (i / (n - 1)) * dw;
+    var y = h - data[i] * h * 0.92;
+    if (i === 0) {
+      ctx.lineTo(x, y);
+    } else {
+      var cpx = (prevX + x) / 2;
+      var cpy = (prevY + y) / 2;
+      ctx.quadraticCurveTo(prevX, prevY, cpx, cpy);
+    }
+    prevX = x;
+    prevY = y;
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+
+// Drawing: 7 frequency band bars
+function drawBands() {
+  var ctx = bandCtx;
+  var w = bandW;
+  var h = bandH;
+  ctx.clearRect(0, 0, w, h);
+
+  var n = 7;
+  var marginX = 28;
+  var marginTop = 28;
+  var labelH = 28;
+  var drawW = w - marginX * 2;
+  var drawH = h - marginTop - labelH;
+  var gap = drawW * 0.04;
+  var barW = (drawW - gap * (n + 1)) / n;
+
+  // Beat flash background
+  if (S.flash > 0.02) {
+    ctx.fillStyle = 'rgba(255, 255, 255, ' + (S.flash * 0.04) + ')';
+    ctx.fillRect(0, 0, w, h);
+  }
+
+  // Thin vertical separator lines
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.03)';
+  ctx.lineWidth = 1;
+  for (var j = 1; j < n; j++) {
+    var sx = marginX + gap + j * (barW + gap) - gap / 2;
+    ctx.beginPath();
+    ctx.moveTo(sx, marginTop);
+    ctx.lineTo(sx, marginTop + drawH);
+    ctx.stroke();
+  }
+
+  for (var i = 0; i < n; i++) {
+    var x = marginX + gap + i * (barW + gap);
+    var energy = S.sBands[i];
+    var barH = Math.max(energy * drawH, 2);
+    var y = marginTop + drawH - barH;
+
+    // Main bar with variable intensity
+    var intensity = 0.55 + energy * 0.35 + S.flash * 0.25;
+    var alpha = Math.min(intensity, 1.0);
+
+    var bg = ctx.createLinearGradient(x, y, x, y + barH);
+    bg.addColorStop(0, 'rgba(255, 255, 255, ' + alpha + ')');
+    bg.addColorStop(1, 'rgba(255, 255, 255, ' + (alpha * 0.5) + ')');
+    ctx.fillStyle = bg;
+    ctx.fillRect(x, y, barW, barH);
+
+    // Accent glow on beat
+    if (S.flash > 0.15) {
+      var ag = ctx.createLinearGradient(x, y, x, y + barH * 0.4);
+      ag.addColorStop(0, 'rgba(0, 255, 204, ' + (S.flash * 0.35) + ')');
+      ag.addColorStop(1, 'rgba(0, 255, 204, 0)');
+      ctx.fillStyle = ag;
+      ctx.fillRect(x, y, barW, barH * 0.4);
+    }
+
+    // Top edge line
+    ctx.fillStyle = 'rgba(255, 255, 255, ' + (0.3 + energy * 0.5) + ')';
+    ctx.fillRect(x, y, barW, 1);
+
+    // Label
+    ctx.fillStyle = energy > 0.3 ? 'rgba(255, 255, 255, 0.5)' : 'rgba(255, 255, 255, 0.2)';
+    ctx.font = '500 9px "IBM Plex Mono", monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(BAND_LABELS[i], x + barW / 2, marginTop + drawH + 16);
+
+    // Energy value
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
+    ctx.font = '300 8px "IBM Plex Mono", monospace';
+    ctx.fillText(energy.toFixed(2), x + barW / 2, marginTop + drawH + 26);
+  }
+}
+
+function updateLightPreview() {
+  var dots = $lightDots.children;
+  var preview = S.lightPreview;
+
+  // Create dots if count changed
+  if (dots.length !== preview.length) {
+    while ($lightDots.firstChild) $lightDots.removeChild($lightDots.firstChild);
+    for (var i = 0; i < preview.length; i++) {
+      var dot = document.createElement('div');
+      dot.className = 'light-dot';
+      $lightDots.appendChild(dot);
+    }
+    dots = $lightDots.children;
+  }
+
+  // Update colors
+  for (var i = 0; i < preview.length; i++) {
+    var c = preview[i];
+    var rgb = 'rgb(' + c.r + ',' + c.g + ',' + c.b + ')';
+    dots[i].style.background = rgb;
+    // Glow effect proportional to brightness
+    var lum = (c.r + c.g + c.b) / 765;
+    if (lum > 0.05) {
+      dots[i].style.boxShadow = '0 0 ' + Math.round(lum * 16) + 'px ' + Math.round(lum * 4) + 'px ' + rgb;
+    } else {
+      dots[i].style.boxShadow = 'none';
+    }
+  }
+
+  // Status text
+  if (S.lightsActive) {
+    $lightStatus.textContent = 'STREAMING';
+    $lightStatus.classList.add('active');
+  } else {
+    $lightStatus.textContent = 'PREVIEW';
+    $lightStatus.classList.remove('active');
+  }
+}
+
+function updateMeters() {
+  var level = Math.min(S.sRms * 5, 1);
+  $levelFill.style.width = (level * 100) + '%';
+  $levelVal.textContent = S.sRms.toFixed(3);
+
+  var beat = S.sBeatStrength;
+  $beatFill.style.width = (beat * 100) + '%';
+  $beatVal.textContent = beat.toFixed(2);
+
+  var cent = Math.min(S.sCentroid / 8000, 1);
+  $centroidFill.style.width = (cent * 100) + '%';
+  $centroidVal.textContent = Math.round(S.sCentroid);
+}
+
+function updateBpm() {
+  if (S.bpm > 0) {
+    var conf = Math.max(S.bpmConfidence, 0.25);
+    $bpmValue.textContent = S.bpm.toFixed(1);
+    $bpmValue.style.opacity = (0.3 + conf * 0.7).toString();
+  } else {
+    $bpmValue.textContent = '---';
+    $bpmValue.style.opacity = '0.3';
+  }
+
+  if (S.flash > 0.7) {
+    $bpmValue.classList.add('pulse');
+  } else if (S.flash < 0.1) {
+    $bpmValue.classList.remove('pulse');
+  }
+}
+
+function updateBeatOverlay() {
+  if (S.flash > 0.01) {
+    $beatOverlay.style.opacity = (S.flash * 0.06).toString();
+  } else {
+    $beatOverlay.style.opacity = '0';
+  }
+}
+
+// Main render loop
+function tick() {
+  for (var i = 0; i < 64; i++) {
+    S.sSpectrum[i] = ema(S.sSpectrum[i], S.spectrum[i]);
+  }
+  for (var i = 0; i < 7; i++) {
+    S.sBands[i] = ema(S.sBands[i], S.bands[i]);
+  }
+  S.sRms = ema(S.sRms, S.rms);
+  S.sBeatStrength = ema(S.sBeatStrength, S.beatStrength);
+  S.sCentroid = ema(S.sCentroid, S.centroid);
+
+  S.flash *= 0.88;
+  S.beatStrength *= 0.92;
+  if (S.beatStrength < 0.001) S.beatStrength = 0;
+
+  drawSpectrum();
+  drawBands();
+  updateLightPreview();
+  updateMeters();
+  updateBpm();
+  updateBeatOverlay();
+
+  requestAnimationFrame(tick);
+}
+
+// Controls
+function initControls() {
+  var $sens = document.getElementById('ctrlSensitivity');
+  var $bass = document.getElementById('ctrlBassBoost');
+  var $cd = document.getElementById('ctrlCooldown');
+  var $sensV = document.getElementById('valSensitivity');
+  var $bassV = document.getElementById('valBassBoost');
+  var $cdV = document.getElementById('valCooldown');
+
+  $sens.addEventListener('input', function() {
+    var v = ($sens.value / 10).toFixed(1);
+    $sensV.textContent = v;
+    send('set_sensitivity', parseFloat(v));
+  });
+
+  $bass.addEventListener('input', function() {
+    var v = ($bass.value / 10).toFixed(1);
+    $bassV.textContent = v;
+    send('set_bass_boost', parseFloat(v));
+  });
+
+  $cd.addEventListener('input', function() {
+    $cdV.textContent = $cd.value;
+    send('set_cooldown', parseInt($cd.value));
+  });
+
+  // Spatial mode buttons
+  var spatialBtns = document.querySelectorAll('#spatialBtns button');
+  spatialBtns.forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      spatialBtns.forEach(function(b) { b.classList.remove('active'); });
+      btn.classList.add('active');
+      send('set_spatial_mode', btn.dataset.mode);
+    });
+  });
+
+  // Genre preset buttons
+  var genreBtns = document.querySelectorAll('#genreBtns button');
+  genreBtns.forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      genreBtns.forEach(function(b) { b.classList.remove('active'); });
+      btn.classList.add('active');
+      send('set_genre', btn.dataset.genre);
+    });
+  });
+
+  // Color mode buttons
+  var colorModeBtns = document.querySelectorAll('#colorModeBtns button');
+  colorModeBtns.forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      colorModeBtns.forEach(function(b) { b.classList.remove('active'); });
+      btn.classList.add('active');
+      send('set_color_mode', btn.dataset.mode);
+    });
+  });
+
+  // Palette buttons
+  var paletteBtns = document.querySelectorAll('#paletteBtns button');
+  paletteBtns.forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      paletteBtns.forEach(function(b) { b.classList.remove('active'); });
+      btn.classList.add('active');
+      send('set_palette', btn.dataset.palette);
+    });
+  });
+
+  // Intensity buttons (Task 1.12)
+  var intensityBtns = document.querySelectorAll('#intensityBtns button');
+  intensityBtns.forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      intensityBtns.forEach(function(b) { b.classList.remove('active'); });
+      btn.classList.add('active');
+      send('set_intensity', btn.dataset.intensity);
+    });
+  });
+
+  // Effects size buttons (Task 1.13)
+  var fxSizeBtns = document.querySelectorAll('#effectsSizeBtns button');
+  fxSizeBtns.forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      fxSizeBtns.forEach(function(b) { b.classList.remove('active'); });
+      btn.classList.add('active');
+      send('set_effects_size_preset', btn.dataset.fxsize);
+    });
+  });
+}
+
+// Init
+function init() {
+  initCanvases();
+  initControls();
+  connect();
+  requestAnimationFrame(tick);
+}
+
+var _resizeTimer = null;
+window.addEventListener('resize', function() {
+  if (_resizeTimer) clearTimeout(_resizeTimer);
+  _resizeTimer = setTimeout(initCanvases, 150);
+});
+
+window.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(uv:*)",
+      "mcp__context7__resolve-library-id",
+      "Bash(python3:*)"
+    ]
+  }
+}

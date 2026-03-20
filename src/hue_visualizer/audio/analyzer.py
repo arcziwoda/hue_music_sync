@@ -1,0 +1,230 @@
+"""FFT analyzer — frequency analysis, band energies, spectral features."""
+
+from collections import deque
+from dataclasses import dataclass, field
+
+import numpy as np
+
+
+# 7-band frequency ranges (Hz)
+FREQUENCY_BANDS = {
+    "sub_bass": (20, 60),
+    "bass": (60, 250),
+    "low_mid": (250, 500),
+    "mid": (500, 2000),
+    "upper_mid": (2000, 4000),
+    "presence": (4000, 6000),
+    "brilliance": (6000, 20000),
+}
+
+BAND_NAMES = list(FREQUENCY_BANDS.keys())
+
+
+@dataclass
+class AudioFeatures:
+    """All extracted audio features for a single frame."""
+
+    # Per-band energy (7 bands, normalized 0-1)
+    band_energies: np.ndarray = field(default_factory=lambda: np.zeros(7))
+
+    # Spectral features
+    spectral_centroid: float = 0.0  # Hz — "brightness" of sound
+    spectral_flux: float = 0.0  # Rate of spectral change
+    spectral_rolloff: float = 0.0  # Frequency below which 85% energy lives
+    spectral_flatness: float = 0.0  # 0=tonal, 1=noise-like
+
+    # Amplitude
+    rms: float = 0.0  # Root mean square energy
+    peak: float = 0.0  # Peak amplitude
+
+    # Raw spectrum for visualization
+    spectrum: np.ndarray = field(default_factory=lambda: np.zeros(0))
+
+    @property
+    def bass_energy(self) -> float:
+        """Combined sub-bass + bass energy."""
+        return float(self.band_energies[0] + self.band_energies[1]) / 2.0
+
+    @property
+    def mid_energy(self) -> float:
+        """Combined low-mid + mid + upper-mid energy."""
+        return float(np.mean(self.band_energies[2:5]))
+
+    @property
+    def high_energy(self) -> float:
+        """Combined presence + brilliance energy."""
+        return float(np.mean(self.band_energies[5:7]))
+
+
+class AudioAnalyzer:
+    """
+    Real-time FFT analyzer with frequency band extraction and spectral features.
+
+    Uses Hann-windowed FFT with configurable size. Extracts 7 frequency band
+    energies, spectral centroid/flux/rolloff/flatness, and RMS.
+    """
+
+    def __init__(
+        self,
+        sample_rate: int = 44100,
+        fft_size: int = 2048,
+        bass_boost: float = 2.0,
+    ):
+        self.sample_rate = sample_rate
+        self.fft_size = fft_size
+        self.bass_boost = bass_boost
+
+        # Pre-compute Hann window
+        self._window = np.hanning(fft_size)
+
+        # Pre-compute frequency bin edges for each band
+        self._band_slices = self._compute_band_slices()
+
+        # Frequency array for centroid/rolloff calculations
+        self._freqs = np.fft.rfftfreq(fft_size, d=1.0 / sample_rate)
+
+        # Previous frame for STFT 50% overlap
+        self._prev_frame: np.ndarray | None = None
+
+        # Previous spectrum for flux calculation
+        self._prev_magnitude: np.ndarray | None = None
+
+        # Running normalization: track max energy per band over ~5 seconds
+        self._band_max = np.ones(7) * 1e-6
+        self._band_max_decay = 0.995  # Slow decay for auto-gain
+
+        # Sliding-window RMS normalization (~5 seconds at ~43 fps)
+        self._rms_window_size = int(5.0 * sample_rate / fft_size * 2)  # ~215 frames
+        self._rms_history: deque[float] = deque(maxlen=self._rms_window_size)
+        self._rms_floor = 1e-4  # Minimum RMS to avoid division by zero in silence
+
+    def analyze(self, frame: np.ndarray) -> AudioFeatures:
+        """
+        Analyze a single audio frame.
+
+        Args:
+            frame: Normalized float32 audio samples in [-1, 1].
+                   Length can be any size; will be zero-padded or truncated to fft_size.
+
+        Returns:
+            AudioFeatures with all extracted features.
+        """
+        features = AudioFeatures()
+
+        # Amplitude features (from raw frame, before windowing)
+        raw_rms = float(np.sqrt(np.mean(frame**2)))
+        features.peak = float(np.max(np.abs(frame)))
+
+        # Sliding-window RMS normalization (volume-independent)
+        self._rms_history.append(raw_rms)
+
+        if len(self._rms_history) > 10:
+            rms_min = min(self._rms_history)
+            rms_max = max(self._rms_history)
+            rms_range = max(rms_max - rms_min, self._rms_floor)
+            features.rms = max(0.0, min(1.0, (raw_rms - rms_min) / rms_range))
+        else:
+            features.rms = raw_rms
+
+        # STFT with 50% overlap: concatenate previous frame with current frame
+        # to get a full fft_size window. On first call, zero-pad for compatibility.
+        if self._prev_frame is not None:
+            stft_frame = np.concatenate([self._prev_frame[-self.fft_size + len(frame):], frame])
+        else:
+            stft_frame = np.zeros(self.fft_size)
+            stft_frame[-len(frame):] = frame
+
+        # Store current frame for next overlap
+        self._prev_frame = frame.copy()
+
+        # Truncate or pad to exact fft_size (safety for variable-length inputs)
+        if len(stft_frame) < self.fft_size:
+            padded = np.zeros(self.fft_size)
+            padded[-len(stft_frame):] = stft_frame
+            stft_frame = padded
+        elif len(stft_frame) > self.fft_size:
+            stft_frame = stft_frame[-self.fft_size:]
+
+        # Apply Hann window
+        windowed = stft_frame * self._window
+
+        # FFT → magnitude spectrum (power spectrum for energy calculations)
+        fft_complex = np.fft.rfft(windowed)
+        magnitude = np.abs(fft_complex)
+        power = magnitude**2
+
+        # Store magnitude spectrum for visualization (dB scale, clamped)
+        magnitude_db = 20 * np.log10(magnitude + 1e-10)
+        features.spectrum = magnitude_db
+
+        # Band energies
+        raw_energies = np.zeros(7)
+        for i, (_, (start, end)) in enumerate(self._band_slices.items()):
+            band_power = power[start:end]
+            if len(band_power) > 0:
+                raw_energies[i] = np.sum(band_power)
+
+        # Auto-gain normalization per band (before bass boost so boost is visible)
+        self._band_max = np.maximum(
+            raw_energies, self._band_max * self._band_max_decay
+        )
+        normalized = raw_energies / (self._band_max + 1e-10)
+
+        # Apply bass boost AFTER normalization (Fletcher-Munson compensation)
+        # This makes bass visually stronger relative to other bands
+        normalized[0] = min(normalized[0] * self.bass_boost, 1.5)  # sub-bass
+        normalized[1] = min(normalized[1] * self.bass_boost, 1.5)  # bass
+        features.band_energies = normalized
+
+        # Spectral centroid: weighted mean frequency
+        mag_sum = np.sum(magnitude)
+        if mag_sum > 1e-10:
+            features.spectral_centroid = float(
+                np.sum(self._freqs * magnitude) / mag_sum
+            )
+
+        # Spectral flux: sum of positive magnitude differences
+        if self._prev_magnitude is not None:
+            diff = magnitude - self._prev_magnitude
+            features.spectral_flux = float(np.sum(np.maximum(0, diff)))
+        self._prev_magnitude = magnitude.copy()
+
+        # Spectral rolloff: freq below which 85% of energy is concentrated
+        cumulative = np.cumsum(power)
+        total = cumulative[-1] if len(cumulative) > 0 else 0
+        if total > 0:
+            rolloff_idx = np.searchsorted(cumulative, 0.85 * total)
+            features.spectral_rolloff = float(
+                self._freqs[min(rolloff_idx, len(self._freqs) - 1)]
+            )
+
+        # Spectral flatness: geometric mean / arithmetic mean
+        mag_positive = magnitude[magnitude > 0]
+        if len(mag_positive) > 10:
+            log_mean = np.mean(np.log(mag_positive + 1e-10))
+            geo_mean = np.exp(log_mean)
+            arith_mean = np.mean(mag_positive)
+            features.spectral_flatness = float(
+                np.clip(geo_mean / (arith_mean + 1e-10), 0, 1)
+            )
+
+        return features
+
+    def _compute_band_slices(self) -> dict[str, tuple[int, int]]:
+        """Pre-compute FFT bin index ranges for each frequency band."""
+        slices = {}
+        freq_per_bin = self.sample_rate / self.fft_size
+
+        for band_name, (low_hz, high_hz) in FREQUENCY_BANDS.items():
+            start_bin = max(1, round(low_hz / freq_per_bin))
+            end_bin = min(self.fft_size // 2, round(high_hz / freq_per_bin) + 1)
+            slices[band_name] = (start_bin, end_bin)
+
+        return slices
+
+    def reset(self) -> None:
+        """Reset internal state (previous spectrum, normalization)."""
+        self._prev_frame = None
+        self._prev_magnitude = None
+        self._band_max = np.ones(7) * 1e-6
+        self._rms_history.clear()
