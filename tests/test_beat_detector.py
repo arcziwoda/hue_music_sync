@@ -432,6 +432,91 @@ class TestFluxOnsetDetection:
         assert result.beat_strength > 0, "Beat strength should be positive for flux beat"
 
 
+class TestPredictionConfidence:
+    """Task 2.2: Confidence scoring with prediction ratio."""
+
+    def test_prediction_window_populated(self):
+        """After steady beats, prediction window should have entries."""
+        bd = BeatDetector(bpm_min=80, bpm_max=180)
+        _simulate_beats(bd, bpm=128, duration_sec=10)
+        assert len(bd._prediction_window) > 0, \
+            "Prediction window should have entries after steady beats"
+
+    def test_prediction_confidence_high_for_steady_beats(self):
+        """Steady beats at 128 BPM should yield high prediction confidence."""
+        bd = BeatDetector(bpm_min=80, bpm_max=180)
+        results = _simulate_beats(bd, bpm=128, duration_sec=10)
+        # After 10 seconds, many predictions should have been confirmed
+        assert bd._prediction_confidence > 0.3, \
+            f"Prediction confidence {bd._prediction_confidence:.2f} should be reasonable for steady beats"
+
+    def test_prediction_confidence_low_for_silence(self):
+        """Silence should produce low prediction confidence (no beats to confirm)."""
+        bd = BeatDetector(bpm_min=80, bpm_max=180)
+        frame_dur = 1.0 / bd._frame_rate
+        t = 0.0
+        for _ in range(500):
+            bd.detect(_make_features(bass_energy=0.0), timestamp=t)
+            t += frame_dur
+        # With no beats and no PLL, prediction confidence should be 0
+        assert bd._prediction_confidence <= 0.1, \
+            f"Prediction confidence {bd._prediction_confidence:.2f} should be low for silence"
+
+    def test_blended_confidence_uses_both_sources(self):
+        """Final confidence should blend autocorrelation and prediction ratio."""
+        bd = BeatDetector(bpm_min=80, bpm_max=180)
+        results = _simulate_beats(bd, bpm=128, duration_sec=10)
+        final = results[-1]
+        # Confidence should be between 0 and 1
+        assert 0 <= final.bpm_confidence <= 1.0
+        # With steady beats, confidence should be meaningful
+        assert final.bpm_confidence > 0.1, \
+            f"Blended confidence {final.bpm_confidence:.2f} should be > 0.1 for steady beats"
+
+    def test_prediction_tolerance_50ms(self):
+        """Predictions should be confirmable within ±50ms tolerance."""
+        bd = BeatDetector(bpm_min=80, bpm_max=180)
+        assert bd._prediction_tolerance == 0.050
+
+    def test_reset_clears_prediction_state(self):
+        """Reset should clear all prediction tracking state."""
+        bd = BeatDetector(bpm_min=80, bpm_max=180)
+        _simulate_beats(bd, bpm=128, duration_sec=5)
+        bd.reset()
+        assert len(bd._prediction_window) == 0
+        assert bd._prediction_confidence == 0.0
+
+    def test_random_beats_low_prediction_confidence(self):
+        """Random (non-periodic) beats should produce low prediction confidence."""
+        bd = BeatDetector(bpm_min=80, bpm_max=180)
+        bd.auto_cooldown = False
+        frame_dur = 1.0 / bd._frame_rate
+        t = 0.0
+        rng = np.random.RandomState(42)
+
+        # First: establish a BPM with steady beats so PLL starts predicting
+        _simulate_beats(bd, bpm=128, duration_sec=6)
+        t = 6.0
+
+        # Then: feed random energy — beats at irregular intervals
+        for _ in range(int(6 * bd._frame_rate)):
+            energy = rng.uniform(0, 1.0)
+            bd.detect(_make_features(bass_energy=energy), timestamp=t)
+            t += frame_dur
+
+        # After random input, prediction confidence should have dropped
+        # (PLL predictions won't match random beats)
+        assert bd._prediction_confidence < 0.8, \
+            f"Prediction confidence {bd._prediction_confidence:.2f} should be low for random beats"
+
+    def test_prediction_window_size_bounded(self):
+        """Prediction window should be bounded (deque with maxlen)."""
+        bd = BeatDetector(bpm_min=80, bpm_max=180)
+        _simulate_beats(bd, bpm=128, duration_sec=20)
+        # Window should not grow unbounded
+        assert len(bd._prediction_window) <= bd._prediction_window.maxlen
+
+
 class TestReset:
     def test_reset_clears_all(self):
         bd = BeatDetector(bpm_min=80, bpm_max=180)
@@ -442,3 +527,6 @@ class TestReset:
         assert bd._raw_bpm == 0
         assert len(bd._onset_buffer) == 0
         assert not bd._locked
+        # Task 2.2: prediction state also cleared
+        assert len(bd._prediction_window) == 0
+        assert bd._prediction_confidence == 0.0

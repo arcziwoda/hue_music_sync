@@ -60,12 +60,16 @@ class ColorMapper:
         brightness_alpha_release: float = 0.1,
         saturation_alpha: float = 0.15,
         color_mode: str = COLOR_MODE_PALETTE,
+        saturation_boost: float = 1.0,
     ):
         self.gamma = gamma
         self.brightness_alpha_attack = brightness_alpha_attack
         self.brightness_alpha_release = brightness_alpha_release
         self.saturation_alpha = saturation_alpha
         self._color_mode = color_mode if color_mode in COLOR_MODES else COLOR_MODE_PALETTE
+
+        # Saturation multiplier (Task 2.19): 0.0 = grayscale, 1.0 = full color
+        self._saturation_boost: float = max(0.0, min(1.0, saturation_boost))
 
         self._saturation = 0.8
         self._brightness = 0.0
@@ -82,6 +86,20 @@ class ColorMapper:
         """Switch color mode. Valid values: 'palette', 'centroid'."""
         if mode in COLOR_MODES:
             self._color_mode = mode
+
+    @property
+    def saturation_boost(self) -> float:
+        """Current saturation multiplier (0.0 = grayscale, 1.0 = full)."""
+        return self._saturation_boost
+
+    def set_saturation_boost(self, value: float) -> None:
+        """Set saturation multiplier (Task 2.19).
+
+        Args:
+            value: Multiplier 0.0 to 1.0. 0.0 = grayscale, 0.5 = pastel,
+                   1.0 = full saturation (default).
+        """
+        self._saturation_boost = max(0.0, min(1.0, value))
 
     def map(self, features: AudioFeatures) -> tuple[float, float, float]:
         """Map audio features to color values.
@@ -123,6 +141,11 @@ class ColorMapper:
         target_sat = max(0.25, min(1.0, 1.0 - features.spectral_flatness * 0.7 + energy_boost))
         self._saturation = _ema(self._saturation, target_sat, self.saturation_alpha)
 
+        # Apply saturation multiplier (Task 2.19): scales output saturation.
+        # Smoothed internally first, then multiplied, so the multiplier acts
+        # as a clean scaling factor that doesn't interfere with EMA dynamics.
+        final_saturation = self._saturation * self._saturation_boost
+
         # --- Brightness from RMS (gamma-corrected) ---
         target_brightness = min(1.0, features.rms ** (1.0 / self.gamma))
         alpha = (
@@ -132,7 +155,7 @@ class ColorMapper:
         )
         self._brightness = _ema(self._brightness, target_brightness, alpha)
 
-        return (hue_result, self._saturation, self._brightness)
+        return (hue_result, final_saturation, self._brightness)
 
     def reset(self) -> None:
         self._saturation = 0.8

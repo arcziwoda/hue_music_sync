@@ -120,6 +120,20 @@ class BeatDetector:
         self._low_confidence_frames: int = 0  # How long confidence has been low
         self._stale_timeout_frames: int = int(self._frame_rate * 5)  # ~5 seconds
 
+        # --- Prediction-ratio confidence (Task 2.2) ---
+        # Track PLL predictions vs actual beat confirmations over ~10 seconds
+        self._prediction_tolerance: float = 0.050  # ±50ms confirmation window
+        # Each entry: (predicted_time, was_confirmed)
+        prediction_window_size = int(10.0 * self.bpm_max / 60.0)  # ~30 predictions at 180 BPM
+        self._prediction_window: deque[tuple[float, bool]] = deque(
+            maxlen=max(prediction_window_size, 20)
+        )
+        # Next predicted beat time from PLL (recorded when phase crosses 0)
+        self._next_predicted_beat: float = 0.0
+        # Whether we already recorded the current prediction cycle
+        self._prediction_recorded: bool = False
+        self._prediction_confidence: float = 0.0
+
         # --- Per-band onset detection (Task 1.5) ---
         # Separate onset histories for low/mid/high bands (~1.5s each)
         band_history_len = max(history_len, 30)
@@ -198,6 +212,14 @@ class BeatDetector:
             info.beat_strength = float(np.clip(max(energy_strength, flux_strength), 0, 1))
             self._last_beat_time = now
 
+            # --- Confirm pending predictions (Task 2.2) ---
+            # Check if this beat matches any unconfirmed prediction within ±50ms
+            for idx in range(len(self._prediction_window)):
+                pred_time, confirmed = self._prediction_window[idx]
+                if not confirmed and abs(now - pred_time) <= self._prediction_tolerance:
+                    self._prediction_window[idx] = (pred_time, True)
+                    break  # Only confirm the closest prediction
+
             # --- PLL correction on detected beat ---
             if self._pll_period > 0:
                 # Phase error: how far from expected beat (phase=0)
@@ -223,8 +245,18 @@ class BeatDetector:
 
         # --- 2. Advance PLL phase ---
         if self._pll_period > 0:
+            old_phase = self._pll_phase
             self._pll_phase += self._frame_dur / self._pll_period
-            self._pll_phase %= 1.0
+            # Detect phase wrap (predicted beat moment): phase crossing 1.0
+            # means one full beat period has elapsed — PLL expects a beat now.
+            if self._pll_phase >= 1.0:
+                # Compute exact predicted time: interpolate within this frame
+                # overshoot = how far past 1.0 we went
+                overshoot = self._pll_phase - 1.0
+                predicted_time = now - overshoot * self._pll_period
+                self._pll_phase %= 1.0
+                # Record prediction for confirmation tracking
+                self._prediction_window.append((predicted_time, False))
 
         # --- 3. Autocorrelation BPM estimation (every ~0.5s) ---
         self._frame_count += 1
@@ -248,8 +280,11 @@ class BeatDetector:
         else:
             pll_bpm = self._raw_bpm
 
-        # Confidence from autocorrelation
-        self._confidence = self._raw_confidence
+        # --- Confidence: blend autocorrelation + prediction ratio (Task 2.2) ---
+        # Compute prediction-ratio confidence from sliding window
+        self._update_prediction_confidence(now)
+        # Blend: 50% autocorrelation strength + 50% prediction accuracy
+        self._confidence = 0.5 * self._raw_confidence + 0.5 * self._prediction_confidence
         self._locked = self._confidence > 0.8
 
         # Confidence gate: below threshold, hold stable BPM (with timeout)
@@ -383,6 +418,45 @@ class BeatDetector:
 
         return info
 
+    def _update_prediction_confidence(self, now: float) -> None:
+        """Compute prediction confidence: ratio of confirmed to total predictions.
+
+        Expired predictions (more than tolerance past their predicted time and
+        not confirmed) are considered missed. Only counts predictions whose
+        confirmation window has fully elapsed.
+
+        Also retroactively confirms any prediction close to the last beat time.
+        This handles the case where a prediction is recorded in the same frame
+        as a beat (phase wrap happens after beat detection in the processing order).
+        """
+        if len(self._prediction_window) == 0:
+            self._prediction_confidence = 0.0
+            return
+
+        # Retroactive confirmation: check if any unconfirmed prediction is close
+        # to the most recent beat time (handles same-frame ordering issue)
+        if self._last_beat_time > 0:
+            for idx in range(len(self._prediction_window)):
+                pred_time, was_confirmed = self._prediction_window[idx]
+                if not was_confirmed and abs(self._last_beat_time - pred_time) <= self._prediction_tolerance:
+                    self._prediction_window[idx] = (pred_time, True)
+
+        confirmed = 0
+        total = 0
+        for pred_time, was_confirmed in self._prediction_window:
+            # Only count predictions whose window has passed
+            # (give tolerance after predicted time for late confirmations)
+            if now > pred_time + self._prediction_tolerance:
+                total += 1
+                if was_confirmed:
+                    confirmed += 1
+
+        if total >= 3:
+            self._prediction_confidence = confirmed / total
+        else:
+            # Not enough data yet -- fall back to autocorrelation only
+            self._prediction_confidence = self._raw_confidence
+
     def _estimate_bpm_autocorrelation(self) -> None:
         """Estimate BPM via autocorrelation of the onset function buffer."""
         onset = np.array(self._onset_buffer)
@@ -481,6 +555,12 @@ class BeatDetector:
         self._last_kick_time = 0.0
         self._last_snare_time = 0.0
         self._last_hihat_time = 0.0
+
+        # Prediction-ratio confidence state (Task 2.2)
+        self._prediction_window.clear()
+        self._next_predicted_beat = 0.0
+        self._prediction_recorded = False
+        self._prediction_confidence = 0.0
 
     # --- Public setters for genre preset configuration ---
 

@@ -16,7 +16,7 @@ from ..core.config import Settings
 from ..utils.color_conversion import hsv_to_rgb
 from ..visualizer import EffectEngine
 from ..visualizer.engine import INTENSITY_LEVELS, INTENSITY_MULTIPLIERS, INTENSITY_NORMAL
-from ..visualizer.presets import PRESETS, PALETTES
+from ..visualizer.presets import PRESETS, PALETTES, generate_palette, PALETTE_ALGO_MODES
 
 logger = logging.getLogger(__name__)
 
@@ -371,6 +371,17 @@ async def audio_loop():
                     data["effects_size"] = round(effect_engine.effects_size, 2)
                     # Task 1.14: Light group info
                     data["light_groups"] = effect_engine.light_groups
+                    # Task 2.5: Safe mode state
+                    data["safe_mode"] = effect_engine.safe_mode
+                    # Task 2.19: Saturation boost state
+                    data["saturation_boost"] = round(effect_engine.saturation_boost, 2)
+                    # Task 2.16: White flash mode state
+                    data["white_flash"] = effect_engine.white_flash_mode
+                    # Task 2.6: Calibration delay state
+                    data["calibration_delay"] = round(effect_engine.calibration_delay_ms)
+                    # Task 2.8: Brightness min/max state
+                    data["brightness_min"] = round(effect_engine.brightness_min, 2)
+                    data["brightness_max"] = round(effect_engine.brightness_max, 2)
 
                 # Task B.10: Include control state so frontend can sync on (re)connect
                 if pipeline:
@@ -439,6 +450,15 @@ async def lifespan(app: FastAPI):
         generative_breathing_min=settings.generative_breathing_min,
         generative_breathing_max=settings.generative_breathing_max,
     )
+
+    # Task 2.6: Apply calibration delay from config
+    if settings.calibration_delay_ms > 0:
+        effect_engine.set_calibration_delay(settings.calibration_delay_ms)
+    # Task 2.8: Apply brightness min/max from config
+    if settings.brightness_min > 0:
+        effect_engine.set_brightness_min(settings.brightness_min)
+    if settings.brightness_max < 1.0:
+        effect_engine.set_brightness_max(settings.brightness_max)
 
     # Task 1.15: Pass bridge light positions to spatial mapper when available
     if entertainment_ctrl and entertainment_ctrl.light_positions:
@@ -568,6 +588,11 @@ def _handle_control(msg: dict):
         effect_engine.set_effects_size(v)
         logger.info(f"Effects size -> {v}")
 
+    elif t == "set_safe_mode" and effect_engine:
+        enabled = bool(msg.get("value", False))
+        effect_engine.set_safe_mode(enabled)
+        logger.info(f"Safe mode -> {'ON' if enabled else 'OFF'}")
+
     elif t == "set_effects_size_preset" and effect_engine:
         # Convenience: accepts named presets "1L", "25%", "50%", "ALL"
         preset = msg.get("value", "ALL")
@@ -581,6 +606,59 @@ def _handle_control(msg: dict):
             size = 1.0
         effect_engine.set_effects_size(size)
         logger.info(f"Effects size preset -> {preset} ({size})")
+
+    elif t == "set_palette_algo" and effect_engine:
+        # Task 2.10: Algorithmic palette generation
+        algo_mode = msg.get("mode", "complementary")
+        base_hue = float(msg.get("base_hue", 200))
+        if algo_mode in PALETTE_ALGO_MODES:
+            palette = generate_palette(algo_mode, base_hue)
+            current_palette = f"algo:{algo_mode}"
+            effect_engine.set_palette(palette)
+            logger.info(
+                f"Algorithmic palette -> {algo_mode} base={base_hue:.0f} "
+                f"hues={[round(h, 1) for h in palette]}"
+            )
+
+    elif t == "set_saturation" and effect_engine:
+        # Task 2.19: Saturation slider
+        v = float(msg.get("value", 1.0))
+        effect_engine.set_saturation_boost(v)
+        logger.info(f"Saturation boost -> {v:.2f}")
+
+    elif t == "set_white_flash" and effect_engine:
+        # Task 2.16: White flash mode toggle
+        enabled = bool(msg.get("value", False))
+        effect_engine.set_white_flash_mode(enabled)
+        logger.info(f"White flash mode -> {'ON' if enabled else 'OFF'}")
+
+    elif t == "trigger_flash" and effect_engine:
+        # Task 2.17: Manual single flash
+        effect_engine.trigger_manual_flash()
+        logger.info("Manual flash triggered")
+
+    elif t == "trigger_strobe" and effect_engine:
+        # Task 2.17: Manual strobe burst (3 flashes)
+        effect_engine.trigger_manual_strobe()
+        logger.info("Manual strobe triggered")
+
+    elif t == "set_calibration_delay" and effect_engine:
+        # Task 2.6: Manual calibration delay
+        v = float(msg.get("value", 0))
+        effect_engine.set_calibration_delay(v)
+        logger.info(f"Calibration delay -> {v}ms (effective: {effect_engine.effective_latency_compensation_ms:.0f}ms)")
+
+    elif t == "set_brightness_min" and effect_engine:
+        # Task 2.8: Brightness floor
+        v = float(msg.get("value", 0))
+        effect_engine.set_brightness_min(v)
+        logger.info(f"Brightness min -> {v:.2f}")
+
+    elif t == "set_brightness_max" and effect_engine:
+        # Task 2.8: Brightness cap
+        v = float(msg.get("value", 1.0))
+        effect_engine.set_brightness_max(v)
+        logger.info(f"Brightness max -> {v:.2f}")
 
 
 def _apply_genre_preset(genre: str) -> None:

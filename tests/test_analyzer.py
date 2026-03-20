@@ -72,3 +72,132 @@ class TestAudioAnalyzer:
         assert analyzer._prev_frame is None
         assert analyzer._prev_magnitude is None
         assert len(analyzer._rms_history) == 0
+
+
+class TestMelFilterbank:
+    """Task 2.1: Mel filterbank with 32 perceptually-spaced triangular filters."""
+
+    def test_mel_energies_shape(self, analyzer):
+        """mel_energies should be a 32-element array."""
+        f = analyzer.analyze(_sine(440, 2048))
+        assert f.mel_energies.shape == (32,)
+
+    def test_mel_energies_nonnegative(self, analyzer):
+        """All Mel band energies should be >= 0."""
+        f = analyzer.analyze(_sine(1000, 2048))
+        assert np.all(f.mel_energies >= 0)
+
+    def test_mel_filterbank_matrix_shape(self, analyzer):
+        """Filterbank matrix should be (32, fft_size // 2 + 1)."""
+        expected_shape = (32, analyzer.fft_size // 2 + 1)
+        assert analyzer._mel_filterbank.shape == expected_shape
+
+    def test_mel_filterbank_triangular_filters(self, analyzer):
+        """Each filter should have a triangular shape with peak of 1.0."""
+        fb = analyzer._mel_filterbank
+        for i in range(fb.shape[0]):
+            row = fb[i]
+            nonzero = row[row > 0]
+            if len(nonzero) > 0:
+                # Peak value should be 1.0 (center of triangle)
+                assert abs(np.max(row) - 1.0) < 1e-10, \
+                    f"Filter {i} peak should be 1.0, got {np.max(row)}"
+                # All values should be in [0, 1]
+                assert np.all(row >= 0) and np.all(row <= 1.0 + 1e-10)
+
+    def test_mel_filters_overlap(self, analyzer):
+        """Adjacent Mel filters should overlap (shared bins)."""
+        fb = analyzer._mel_filterbank
+        overlap_count = 0
+        for i in range(fb.shape[0] - 1):
+            active_i = set(np.where(fb[i] > 0)[0])
+            active_next = set(np.where(fb[i + 1] > 0)[0])
+            if active_i & active_next:
+                overlap_count += 1
+        # Most adjacent filters should overlap (low-frequency ones may not
+        # if they are narrow, but most should)
+        assert overlap_count > fb.shape[0] * 0.5, \
+            f"Expected most filters to overlap, only {overlap_count}/{fb.shape[0]-1} do"
+
+    def test_mel_filters_cover_full_range(self, analyzer):
+        """Filterbank should cover bins from low to high frequency."""
+        fb = analyzer._mel_filterbank
+        # Aggregate: which bins have at least one filter active
+        active_bins = np.any(fb > 0, axis=0)
+        active_indices = np.where(active_bins)[0]
+        # Should start near the beginning and reach near the end
+        assert active_indices[0] <= 5, \
+            f"First active bin {active_indices[0]} should be near 0"
+        assert active_indices[-1] >= fb.shape[1] * 0.8, \
+            f"Last active bin {active_indices[-1]} should be near end ({fb.shape[1]})"
+
+    def test_bass_sine_mel_energy_in_low_bands(self, analyzer):
+        """A 100 Hz sine should excite low Mel bands, not high ones."""
+        # Feed a few frames so auto-gain settles
+        for _ in range(5):
+            analyzer.analyze(_sine(100, 2048))
+        f = analyzer.analyze(_sine(100, 2048))
+        # Most energy should be in the first few Mel bands
+        low_sum = float(np.sum(f.mel_energies[:8]))
+        high_sum = float(np.sum(f.mel_energies[24:]))
+        assert low_sum > high_sum, \
+            f"Bass sine: low Mel sum ({low_sum:.3f}) should exceed high ({high_sum:.3f})"
+
+    def test_treble_sine_mel_energy_in_high_bands(self, analyzer):
+        """A 10 kHz sine should excite high Mel bands, not low ones."""
+        for _ in range(5):
+            analyzer.analyze(_sine(10000, 2048))
+        f = analyzer.analyze(_sine(10000, 2048))
+        low_sum = float(np.sum(f.mel_energies[:8]))
+        high_sum = float(np.sum(f.mel_energies[24:]))
+        assert high_sum > low_sum, \
+            f"Treble sine: high Mel sum ({high_sum:.3f}) should exceed low ({low_sum:.3f})"
+
+    def test_mel_auto_gain_normalization(self, analyzer):
+        """Mel energies should be auto-gain normalized (values approach 1.0)."""
+        # Feed steady signal for many frames
+        for _ in range(50):
+            analyzer.analyze(_sine(440, 2048))
+        f = analyzer.analyze(_sine(440, 2048))
+        # At least one Mel band should be close to 1.0 after auto-gain
+        assert np.max(f.mel_energies) > 0.5, \
+            f"Max Mel energy {np.max(f.mel_energies):.3f} should approach 1.0 after auto-gain"
+
+    def test_silence_mel_energies_near_zero(self, analyzer):
+        """Silence should produce near-zero Mel energies."""
+        f = analyzer.analyze(np.zeros(1024, dtype=np.float32))
+        assert np.max(f.mel_energies) < 0.01
+
+    def test_mel_default_in_audio_features(self):
+        """Default AudioFeatures should have 32-element zero mel_energies."""
+        f = AudioFeatures()
+        assert f.mel_energies.shape == (32,)
+        assert np.all(f.mel_energies == 0)
+
+    def test_reset_clears_mel_state(self, analyzer):
+        """Reset should reinitialize mel_max to small values."""
+        for _ in range(20):
+            analyzer.analyze(_sine(440, 2048))
+        analyzer.reset()
+        # After reset, mel_max should be back to initial small value
+        assert np.all(analyzer._mel_max < 1e-5)
+
+    def test_mel_spacing_is_perceptual(self, analyzer):
+        """Lower Mel bands should span fewer Hz than higher ones (Mel spacing)."""
+        fb = analyzer._mel_filterbank
+        n_fft_bins = fb.shape[1]
+        freq_per_bin = analyzer.sample_rate / analyzer.fft_size
+
+        # Find center bin of each filter (bin with max value)
+        centers_hz = []
+        for i in range(fb.shape[0]):
+            center_bin = np.argmax(fb[i])
+            centers_hz.append(center_bin * freq_per_bin)
+
+        # Check that spacing increases: first 8 bands should be closer together
+        # than last 8 bands (Mel property)
+        if len(centers_hz) >= 16:
+            low_spacing = centers_hz[8] - centers_hz[0]
+            high_spacing = centers_hz[-1] - centers_hz[-9]
+            assert high_spacing > low_spacing, \
+                f"Mel spacing: high bands ({high_spacing:.0f} Hz) should span more than low ({low_spacing:.0f} Hz)"

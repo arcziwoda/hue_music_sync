@@ -173,6 +173,31 @@ class Settings(BaseSettings):
         le=1.0,
     )
 
+    # Calibration delay (Task 2.6)
+    calibration_delay_ms: float = Field(
+        default=0.0,
+        description="Manual calibration delay in milliseconds (0-600). "
+        "Adds to the predictive beat latency compensation to compensate for "
+        "system-specific audio-to-light delay. Community consensus for Hue systems "
+        "is +300 to +600ms additional delay.",
+        ge=0.0,
+        le=600.0,
+    )
+
+    # Brightness min/max (Task 2.8)
+    brightness_min: float = Field(
+        default=0.0,
+        description="Minimum brightness floor (0-1). Lights never go below this value.",
+        ge=0.0,
+        le=1.0,
+    )
+    brightness_max: float = Field(
+        default=1.0,
+        description="Maximum brightness cap (0-1). Lights never exceed this value.",
+        ge=0.0,
+        le=1.0,
+    )
+
     # Safety Configuration
     max_flash_hz: float = Field(
         default=3.0,

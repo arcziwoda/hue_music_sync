@@ -25,8 +25,9 @@ class SpatialMapper:
     WAVE = "wave"
     MIRROR = "mirror"
     CHASE = "chase"
+    ALTERNATING = "alternating"
 
-    MODES = [UNIFORM, FREQUENCY_ZONES, WAVE, MIRROR, CHASE]
+    MODES = [UNIFORM, FREQUENCY_ZONES, WAVE, MIRROR, CHASE, ALTERNATING]
 
     def __init__(self, num_lights: int, mode: str = "frequency_zones"):
         self.num_lights = max(num_lights, 1)
@@ -48,6 +49,11 @@ class SpatialMapper:
         # Whether to alternate direction on each beat cycle
         self._chase_alternating: bool = True
 
+        # Wave pulse state (Task 2.12): beat-triggered brightness pulse
+        # Per-bulb activation timestamps for wave pulse propagation
+        self._wave_pulse_start: float = 0.0  # When the current wave pulse started
+        self._wave_pulse_active: bool = False  # Whether a wave pulse is currently traveling
+
     def set_positions(self, positions: list[float]) -> None:
         """Set light positions from bridge entertainment area data.
 
@@ -64,3 +70,5 @@ class SpatialMapper:
         self._chase_position = 0.0
         self._chase_last_activated = [0.0] * self.num_lights
         self._chase_direction = 1
+        self._wave_pulse_start = 0.0
+        self._wave_pulse_active = False

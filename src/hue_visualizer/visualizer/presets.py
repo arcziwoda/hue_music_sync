@@ -2,6 +2,11 @@
 
 Each genre has a default palette that is applied when the preset is selected.
 Users can still override the palette manually via the palette buttons.
+
+Algorithmic palette generation (Task 2.10):
+  - complementary: 2 colors 180 degrees apart on the color wheel
+  - triadic: 3 colors 120 degrees apart
+  - analogous: 3 colors 30 degrees apart (tight cluster)
 """
 
 from dataclasses import dataclass
@@ -27,6 +32,61 @@ PALETTES: dict[str, tuple[float, ...]] = {
 }
 
 DEFAULT_PALETTE = "neon"
+
+# --- Algorithmic palette generation (Task 2.10) ---
+
+PALETTE_ALGO_MODES = ("complementary", "triadic", "analogous")
+
+
+def generate_palette(mode: str, base_hue: float) -> tuple[float, ...]:
+    """Generate a harmonious palette algorithmically from a base hue.
+
+    Args:
+        mode: One of 'complementary', 'triadic', or 'analogous'.
+        base_hue: Base hue in degrees (0-360). Will be normalized.
+
+    Returns:
+        Tuple of hue values (degrees, 0-360). Length depends on mode:
+        - complementary: 4 hues (base, base+180, plus two intermediate accents)
+        - triadic: 3 hues (base, base+120, base+240)
+        - analogous: 3 hues (base-30, base, base+30)
+
+    Raises:
+        ValueError: If mode is not a valid algorithm name.
+    """
+    if mode not in PALETTE_ALGO_MODES:
+        raise ValueError(
+            f"Unknown palette algorithm '{mode}'. "
+            f"Valid modes: {PALETTE_ALGO_MODES}"
+        )
+
+    base_hue = base_hue % 360.0
+
+    if mode == "complementary":
+        # Two opposite hues plus two intermediate accent hues (at +/-90)
+        # for a richer 4-color palette. The accents are offset slightly
+        # (80 and 260 instead of 90 and 270) for a more pleasing result.
+        return (
+            base_hue,
+            (base_hue + 180.0) % 360.0,
+            (base_hue + 80.0) % 360.0,
+            (base_hue + 260.0) % 360.0,
+        )
+
+    if mode == "triadic":
+        # Three equally spaced hues — high contrast, balanced.
+        return (
+            base_hue,
+            (base_hue + 120.0) % 360.0,
+            (base_hue + 240.0) % 360.0,
+        )
+
+    # analogous: tight cluster of hues for a cohesive, harmonious look.
+    return (
+        (base_hue - 30.0) % 360.0,
+        base_hue,
+        (base_hue + 30.0) % 360.0,
+    )
 
 
 # --- Genre Presets (beat detection, smoothing, spatial + default palette) ---

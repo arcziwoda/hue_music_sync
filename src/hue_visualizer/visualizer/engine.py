@@ -105,6 +105,14 @@ class _LightSmoothed:
     sparkle_brightness: float = 0.0  # Decaying sparkle brightness
     sparkle_hue: float = 260.0  # Blue-violet hue for sparkle
 
+    # Previous output state for hysteresis dead zone (Task 2.4)
+    prev_out_hue: float = 180.0
+    prev_out_saturation: float = 0.5
+    prev_out_brightness: float = 0.0
+
+    # Whether a flash onset happened this tick (Task 2.3: exempt from delta limit)
+    flash_onset_this_tick: bool = False
+
 
 def _palette_hue(palette: tuple[float, ...], phase: float) -> float:
     """Get interpolated hue from palette at a given phase (0-1)."""
@@ -169,6 +177,11 @@ class GenerativeLayer:
         self._breathing_phase: float = 0.0  # 0-1, position in breathing cycle
         self._wave_phase: float = 0.0  # 0-1, spatial wave position
 
+        # Task 2.13: Beat-synced breathing
+        # When BPM is available, breathing syncs to a 4-beat cycle.
+        # At 128 BPM: 4 beats = 4 * (60/128) = 1.875 seconds per cycle.
+        self._breathing_beats_per_cycle: float = 4.0
+
         # Palette reference (set by engine)
         self._palette: tuple[float, ...] = (280.0, 240.0, 0.0, 320.0)
 
@@ -177,28 +190,58 @@ class GenerativeLayer:
             i / max(self.num_lights - 1, 1) for i in range(self.num_lights)
         ]
 
-    def tick(self, dt: float) -> list[tuple[float, float, float]]:
+    def tick(
+        self,
+        dt: float,
+        bpm: float = 0.0,
+        energy_level: float = 0.0,
+        hue_speed_multiplier: float = 1.0,
+    ) -> list[tuple[float, float, float]]:
         """Advance generative patterns and return per-light (H, S, V).
 
         Args:
             dt: Time since last tick in seconds.
+            bpm: Current detected BPM (0 = no BPM available).
+            energy_level: Smoothed energy level 0-1 (for modulating breathing range).
+            hue_speed_multiplier: Section-based speed multiplier for hue rotation (Task 2.14).
 
         Returns:
             List of (hue, saturation, brightness) tuples, one per light.
         """
-        # Advance phases
-        self._hue_phase = (self._hue_phase + dt / self.hue_cycle_period) % 1.0
-        self._breathing_phase = (
-            self._breathing_phase + dt * self.breathing_rate_hz
+        # Advance phases (Task 2.14: hue rotation speed modulated by section)
+        self._hue_phase = (
+            self._hue_phase + dt / self.hue_cycle_period * hue_speed_multiplier
         ) % 1.0
         self._wave_phase = (self._wave_phase + dt * self.wave_speed) % 1.0
 
+        # Task 2.13: Beat-synced breathing when BPM is available
+        if bpm > 0:
+            # 4-beat cycle: at 128 BPM, period = 4 * (60/128) = 1.875s
+            beat_period_sec = (60.0 / bpm) * self._breathing_beats_per_cycle
+            breathing_rate = 1.0 / beat_period_sec
+            self._breathing_phase = (
+                self._breathing_phase + dt * breathing_rate
+            ) % 1.0
+        else:
+            # Fallback: fixed frequency (0.25 Hz default)
+            self._breathing_phase = (
+                self._breathing_phase + dt * self.breathing_rate_hz
+            ) % 1.0
+
         # Global breathing brightness: sinusoidal oscillation
         breath = 0.5 + 0.5 * math.sin(2 * math.pi * self._breathing_phase)
-        breath_brightness = (
-            self.breathing_min
-            + (self.breathing_max - self.breathing_min) * breath
-        )
+
+        # Task 2.13: Energy-modulated breathing range
+        # Louder music -> smaller breathing range (reactive takes over)
+        # At energy=0: full range (breathing_min to breathing_max)
+        # At energy=1: compressed range (narrower swing around midpoint)
+        range_scale = 1.0 - energy_level * 0.7  # At max energy, range is 30% of normal
+        mid = (self.breathing_min + self.breathing_max) / 2.0
+        half_range = (self.breathing_max - self.breathing_min) / 2.0 * range_scale
+        effective_min = max(0.0, mid - half_range)
+        effective_max = min(1.0, mid + half_range)
+
+        breath_brightness = effective_min + (effective_max - effective_min) * breath
 
         result = []
         for i in range(self.num_lights):
@@ -350,8 +393,22 @@ class EffectEngine:
         self._lights = [_LightSmoothed() for _ in range(self.num_lights)]
 
         # Safety: max flash rate (epilepsy limit)
+        self._base_max_flash_hz = max_flash_hz
         self._min_flash_interval = 1.0 / max(max_flash_hz, 0.1)
         self._last_flash_time = 0.0
+
+        # --- Safe mode (Task 2.5) ---
+        self._safe_mode: bool = False
+
+        # --- Brightness delta limiting (Task 2.3) ---
+        # Max brightness change per frame (at ~30Hz). Beat flash onset is exempt.
+        self._brightness_delta_limit: float = 0.4  # 40% per frame (normal mode)
+        self._brightness_delta_limit_safe: float = 0.3  # 30% per frame (safe mode)
+
+        # --- Hysteresis dead zone (Task 2.4) ---
+        self._hysteresis_brightness: float = 0.025  # 2.5% of full range
+        self._hysteresis_hue: float = 2.0  # 2 degrees
+        self._hysteresis_saturation: float = 0.02  # 2% of full range
 
         # Beat flash: exponential decay tau (time constant in seconds)
         # Research: tau = 200-500ms. At tau=0.25, flash decays to 37% in 250ms.
@@ -372,6 +429,17 @@ class EffectEngine:
         self._predictive_confidence_threshold = predictive_confidence_threshold
         self._last_predictive_beat_target: float = 0.0
         self._predictive_beat_fired: bool = False
+
+        # --- Calibration delay (Task 2.6) ---
+        # Adds to latency_compensation_sec for total effective compensation.
+        # Range: 0-600ms. Community consensus for Hue: +300 to +600ms.
+        self._calibration_delay_sec: float = 0.0
+
+        # --- Brightness min/max (Task 2.8) ---
+        # Global brightness floor and cap. Applied at final output stage.
+        # output_brightness = min_b + (max_b - min_b) * raw_brightness
+        self._brightness_min: float = 0.0
+        self._brightness_max: float = 1.0
 
         # --- Generative layer (Task 1.1) ---
         self._generative = GenerativeLayer(
@@ -413,6 +481,22 @@ class EffectEngine:
         # tau = 0.15 gives a visible tail across 2-3 bulbs.
         self._chase_decay_tau: float = 0.15
 
+        # --- Wave pulse (Task 2.12) ---
+        # Per-bulb delay for beat-triggered wave pulse propagation (seconds).
+        self._wave_pulse_delay_per_bulb: float = 0.075  # 75ms per bulb
+        # Exponential decay tau for wave pulse brightness (seconds).
+        self._wave_pulse_decay_tau: float = 0.20  # 200ms decay
+        # Wave pulse strength (0-1): how much brightness the pulse adds.
+        self._wave_pulse_strength: float = 0.6
+
+        # --- Alternating mode hue ranges (Task 2.11) ---
+        # Even lights: bass-driven warm colors (red/orange/amber)
+        self._alt_bass_hue_min: float = 0.0    # Red
+        self._alt_bass_hue_max: float = 40.0   # Amber
+        # Odd lights: treble-driven cool colors (blue/cyan/violet)
+        self._alt_treble_hue_min: float = 200.0  # Cyan
+        self._alt_treble_hue_max: float = 280.0  # Violet
+
         # --- Intensity selector (Task 1.12) ---
         self._intensity_level: str = INTENSITY_NORMAL
         # Base values are the "raw" values set by genre presets.
@@ -438,6 +522,15 @@ class EffectEngine:
         self._num_groups: int = 0
         self._group_phase_offsets: list[float] = []
         self._compute_light_groups()
+
+        # --- White flash mode (Task 2.16) ---
+        # When enabled, beat flash uses white (saturation=0, brightness=1.0)
+        # instead of the current color, for maximum lumen output from bulbs.
+        self._white_flash_mode: bool = False
+
+        # --- Manual strobe trigger (Task 2.17) ---
+        # Pending manual flash count: decremented each time a flash is fired.
+        self._manual_flash_pending: int = 0
 
         # --- Section detection state (Task 1.3) ---
         self._current_section = Section.NORMAL
@@ -509,7 +602,15 @@ class EffectEngine:
         )
 
         # --- 3. Generative layer ---
-        gen_hsv = self._generative.tick(dt)
+        # Task 2.13: Pass BPM and energy for beat-synced breathing + range modulation
+        # Task 2.14: Pass section-based hue speed multiplier
+        rotation_speed_mult = self._get_rotation_speed_multiplier()
+        gen_hsv = self._generative.tick(
+            dt,
+            bpm=beat_info.bpm,
+            energy_level=self._energy_level,
+            hue_speed_multiplier=rotation_speed_mult,
+        )
 
         # --- 4. Reactive layer ---
         react_hsv = self._reactive_layer(features, beat_info, trigger_beat, dt, now)
@@ -522,6 +623,10 @@ class EffectEngine:
 
         # --- 5c. Beat flash overlay (applied AFTER blend, so flash always
         #     punches through regardless of reactive/generative balance) ---
+        # Task 2.3: Clear flash onset flags at start of tick
+        for light in self._lights:
+            light.flash_onset_this_tick = False
+
         # DROP: fire a massive flash on transition (all lights full brightness)
         if self._drop_flash_pending:
             self._drop_flash_pending = False
@@ -529,6 +634,7 @@ class EffectEngine:
                 self._last_flash_time = now
                 for light in self._lights:
                     light.flash_brightness = 1.0  # Max flash for drop
+                    light.flash_onset_this_tick = True
 
         # Regular beat flash (also triggered by snare onsets for bright white flash)
         if trigger_beat or beat_info.snare_onset:
@@ -536,6 +642,9 @@ class EffectEngine:
             # Snare onset without main beat: use snare energy as flash strength
             if beat_info.snare_onset and not trigger_beat:
                 flash_strength = min(1.0, beat_info.snare_energy * 0.8)
+            # Task 2.5: Safe mode reduces flash intensity by 30%
+            if self._safe_mode:
+                flash_strength = flash_strength * 0.7
             # BUILDUP: amplify beat flash as buildup progresses
             if section.section == Section.BUILDUP:
                 flash_strength = min(1.0, flash_strength * (1.0 + 0.5 * section.intensity))
@@ -545,11 +654,25 @@ class EffectEngine:
                 for idx, light in enumerate(self._lights):
                     if idx in self._active_lights:
                         light.flash_brightness = flash_strength
+                        light.flash_onset_this_tick = True
                     # Inactive lights keep their current (decaying) flash
 
             # Task 1.13: Advance active light rotation on beat
             if trigger_beat:
                 self._advance_active_lights()
+
+        # --- 5c-manual. Manual flash/strobe trigger (Task 2.17) ---
+        # Manual flashes are processed independently, respecting safety limiter.
+        if self._manual_flash_pending > 0:
+            if (now - self._last_flash_time) >= self._min_flash_interval:
+                self._manual_flash_pending -= 1
+                self._last_flash_time = now
+                manual_strength = 1.0
+                if self._safe_mode:
+                    manual_strength = 0.7
+                for light in self._lights:
+                    light.flash_brightness = manual_strength
+                    light.flash_onset_this_tick = True
 
         # --- 5c-chase. Chase mode: advance chase position on beat ---
         if trigger_beat and self.spatial_mapper.mode == SpatialMapper.CHASE:
@@ -568,6 +691,11 @@ class EffectEngine:
             # Mark the newly activated bulb
             active_idx = int(round(sm._chase_position)) % n
             sm._chase_last_activated[active_idx] = now
+
+        # --- 5c-wave. Wave pulse: trigger beat-propagating pulse (Task 2.12) ---
+        if trigger_beat and self.spatial_mapper.mode == SpatialMapper.WAVE:
+            self.spatial_mapper._wave_pulse_start = now
+            self.spatial_mapper._wave_pulse_active = True
 
         # --- 5d. Bass pulse overlay (Task 1.10) ---
         # Kick onset triggers red/orange pulse on bass-dominant lights
@@ -677,10 +805,16 @@ class EffectEngine:
                 + light.sparkle_brightness * 0.5 * reactive_scale
             )
 
+            # Task 2.16: White flash mode — when active, drive saturation
+            # toward 0 proportionally to flash brightness for maximum lumen output.
+            if self._white_flash_mode and light.flash_brightness > 0.02:
+                white_weight = min(1.0, light.flash_brightness * reactive_scale)
+                final_s = final_s * (1.0 - white_weight)
+
             # Task 1.12: Apply intensity max brightness cap
             combined_b = min(combined_b, self._max_brightness)
 
-            # Asymmetric EMA smoothing — fast attack, slower release
+            # --- Step 1: Asymmetric EMA smoothing — fast attack, slower release ---
             b_alpha = (
                 self.attack_alpha
                 if combined_b > light.brightness
@@ -690,22 +824,102 @@ class EffectEngine:
             light.saturation = _ema(light.saturation, min(1.0, final_s), 0.2)
             light.brightness = _ema(light.brightness, combined_b, b_alpha)
 
-            # Safety: no strobe saturated red
+            # --- Step 2: Safety limiter (Task 2.9: red -> orange shift) ---
             any_flash_active = (
                 light.flash_brightness > 0.3
                 or light.bass_pulse_brightness > 0.3
             )
-            if (light.hue < 15 or light.hue > 345) and any_flash_active:
+            is_red = light.hue < 15 or light.hue > 345
+            if is_red and light.saturation > 0.8 and any_flash_active:
+                # Task 2.9: Shift hue toward orange (25-30 deg) instead of
+                # just desaturating. Orange is visually pleasing and safe.
+                if light.hue < 15:
+                    # Hue is 0-15: shift toward 28
+                    light.hue = 28.0
+                else:
+                    # Hue is 345-360: shift toward 28 (wrap through 0)
+                    light.hue = 28.0
+            elif is_red and any_flash_active:
+                # Lower saturation reds (0.5-0.8) — keep legacy desaturation
                 light.saturation = min(light.saturation, 0.7)
 
-            x, y = hsv_to_xy(light.hue, light.saturation, 1.0)
+            # --- Step 3: Brightness delta limiting (Task 2.3) ---
+            # Clamp max brightness change per frame. Beat flash onset is exempt.
+            if not light.flash_onset_this_tick:
+                delta_limit = (
+                    self._brightness_delta_limit_safe
+                    if self._safe_mode
+                    else self._brightness_delta_limit
+                )
+                brightness_delta = light.brightness - light.prev_out_brightness
+                if abs(brightness_delta) > delta_limit:
+                    if brightness_delta > 0:
+                        light.brightness = light.prev_out_brightness + delta_limit
+                    else:
+                        light.brightness = light.prev_out_brightness - delta_limit
+
+            # --- Step 4: Hysteresis dead zone (Task 2.4) ---
+            # Suppress sub-perceptual changes to reduce bridge traffic and
+            # prevent micro-flicker.
+            out_h = light.hue
+            out_s = light.saturation
+            out_b = light.brightness
+
+            hue_diff = abs(out_h - light.prev_out_hue)
+            if hue_diff > 180:
+                hue_diff = 360 - hue_diff
+            if hue_diff < self._hysteresis_hue:
+                out_h = light.prev_out_hue
+
+            if abs(out_s - light.prev_out_saturation) < self._hysteresis_saturation:
+                out_s = light.prev_out_saturation
+
+            if abs(out_b - light.prev_out_brightness) < self._hysteresis_brightness:
+                out_b = light.prev_out_brightness
+
+            # Store output state for next tick's delta/hysteresis comparisons
+            light.prev_out_hue = out_h
+            light.prev_out_saturation = out_s
+            light.prev_out_brightness = out_b
+
+            # --- Step 5: Brightness min/max mapping (Task 2.8) ---
+            # Remap brightness into [brightness_min, brightness_max] range.
+            # output = min_b + (max_b - min_b) * raw_brightness
+            final_b = (
+                self._brightness_min
+                + (self._brightness_max - self._brightness_min) * out_b
+            )
+
+            x, y = hsv_to_xy(out_h, out_s, 1.0)
             light_states.append(
-                LightState(x=x, y=y, brightness=light.brightness, light_id=i)
+                LightState(x=x, y=y, brightness=final_b, light_id=i)
             )
 
         return light_states
 
     # --- Section modulation helpers (Task 1.3) ---
+
+    def _get_rotation_speed_multiplier(self) -> float:
+        """Return hue rotation speed multiplier based on current section (Task 2.14).
+
+        - BREAKDOWN: 0.5x speed (slower, more ambient)
+        - BUILDUP: 2.0x speed (more energetic, building tension)
+        - DROP: 1.5x speed (fast but not as frantic as buildup)
+        - NORMAL: 1.0x (base speed)
+
+        The multiplier is smoothly interpolated using section intensity
+        to avoid jarring speed changes.
+        """
+        if self._current_section == Section.BREAKDOWN:
+            # Slow down: lerp from 1.0 toward 0.5 based on section intensity
+            return 1.0 - 0.5 * self._section_intensity
+        elif self._current_section == Section.BUILDUP:
+            # Speed up: lerp from 1.0 toward 2.0 based on section intensity
+            return 1.0 + 1.0 * self._section_intensity
+        elif self._current_section == Section.DROP:
+            # Moderately faster during drops
+            return 1.0 + 0.5 * self._section_intensity
+        return 1.0
 
     def _section_modulate_reactive_weight(
         self, base_weight: float, section: SectionInfo
@@ -790,22 +1004,31 @@ class EffectEngine:
     ) -> tuple[bool, float]:
         """Determine if a beat should fire this tick (predictive or reactive).
 
+        Task 2.6: Uses effective latency compensation = base + calibration delay.
+        More compensation = earlier trigger = more lead time to compensate for
+        system-specific audio-to-light delay.
+
         Returns:
             (trigger_beat, beat_strength) tuple.
         """
         trigger_beat = False
         beat_strength = beat_info.beat_strength
 
+        # Task 2.6: Effective compensation includes calibration delay
+        effective_compensation = (
+            self._latency_compensation_sec + self._calibration_delay_sec
+        )
+
         # Check for predictive trigger
         predictive_available = (
-            self._latency_compensation_sec > 0
+            effective_compensation > 0
             and beat_info.predicted_next_beat > 0
             and beat_info.bpm_confidence >= self._predictive_confidence_threshold
         )
 
         if predictive_available:
             predicted = beat_info.predicted_next_beat
-            fire_at = predicted - self._latency_compensation_sec
+            fire_at = predicted - effective_compensation
             is_new_prediction = (
                 abs(predicted - self._last_predictive_beat_target) > 0.05
             )
@@ -823,7 +1046,7 @@ class EffectEngine:
                 time_since_prediction = abs(
                     now - self._last_predictive_beat_target
                 )
-                if time_since_prediction < self._latency_compensation_sec + 0.1:
+                if time_since_prediction < effective_compensation + 0.1:
                     pass  # Skip — corresponds to our predictive trigger
                 else:
                     trigger_beat = True
@@ -867,6 +1090,9 @@ class EffectEngine:
         is_centroid_mode = self.color_mapper.color_mode == COLOR_MODE_CENTROID
 
         # Advance rotation phase (colors chase across lights) -- palette mode only
+        # Task 2.14: Section-based speed modulation
+        rotation_speed_mult = self._get_rotation_speed_multiplier()
+
         if not is_centroid_mode:
             if trigger_beat:
                 self._beat_count += 1
@@ -877,11 +1103,11 @@ class EffectEngine:
                 beats_per_sec = beat_info.bpm / 60.0
                 self._rotation_phase = (
                     self._rotation_phase
-                    + dt * beats_per_sec / self._beats_per_rotation
+                    + dt * beats_per_sec / self._beats_per_rotation * rotation_speed_mult
                 ) % 1.0
             else:
                 self._base_hue_offset = (
-                    self._base_hue_offset + self._base_hue_speed * dt
+                    self._base_hue_offset + self._base_hue_speed * dt * rotation_speed_mult
                 ) % 360
                 self._rotation_phase = (self._base_hue_offset / 360.0) % 1.0
 
@@ -959,10 +1185,32 @@ class EffectEngine:
                 result.append((hue, base_sat, base_brightness))
 
             elif mode == SpatialMapper.WAVE:
+                # Continuous sine wave as background modulation
                 wave = 0.5 + 0.5 * math.sin(
                     2 * math.pi * (self.spatial_mapper._wave_phase - pos)
                 )
                 brightness = min(1.0, base_brightness * (0.15 + 0.85 * wave))
+
+                # Task 2.12: Beat-triggered wave pulse on top of continuous sine
+                if self.spatial_mapper._wave_pulse_active:
+                    # Each bulb activates after i * delay_per_bulb from pulse start
+                    time_since_pulse = now - self.spatial_mapper._wave_pulse_start
+                    bulb_trigger_time = i * self._wave_pulse_delay_per_bulb
+                    time_since_trigger = time_since_pulse - bulb_trigger_time
+
+                    if time_since_trigger >= 0:
+                        # Bulb has been triggered — exponential decay from trigger point
+                        pulse_b = self._wave_pulse_strength * math.exp(
+                            -time_since_trigger / self._wave_pulse_decay_tau
+                        )
+                        if pulse_b > 0.01:
+                            brightness = min(1.0, brightness + pulse_b)
+
+                    # Deactivate pulse after it has fully traveled + decayed
+                    total_travel = (n_lights - 1) * self._wave_pulse_delay_per_bulb
+                    if time_since_pulse > total_travel + self._wave_pulse_decay_tau * 4:
+                        self.spatial_mapper._wave_pulse_active = False
+
                 if centroid_mode or self._num_groups <= 1:
                     hue = shared_hue
                 else:
@@ -995,6 +1243,30 @@ class EffectEngine:
                     hue = (hue + hue_value) % 360
 
                 result.append((hue, base_sat, brightness))
+
+            elif mode == SpatialMapper.ALTERNATING:
+                # Task 2.11: Even lights respond to bass (warm), odd to treble (cool)
+                is_even = (i % 2 == 0)
+                if is_even:
+                    # Bass/warm: brightness from bass energy, hue in red/orange/amber
+                    energy = features.bass_energy
+                    # Map bass energy to hue within warm range
+                    hue = self._alt_bass_hue_min + (
+                        self._alt_bass_hue_max - self._alt_bass_hue_min
+                    ) * (1.0 - min(1.0, energy))  # Higher energy -> more red
+                    brightness = min(1.0, base_brightness * (0.2 + 0.8 * energy))
+                    # Warm lights get high saturation
+                    sat = min(1.0, base_sat + 0.15)
+                else:
+                    # Treble/cool: brightness from high energy, hue in blue/cyan/violet
+                    energy = features.high_energy
+                    # Map treble energy to hue within cool range
+                    hue = self._alt_treble_hue_min + (
+                        self._alt_treble_hue_max - self._alt_treble_hue_min
+                    ) * min(1.0, energy)  # Higher energy -> more violet
+                    brightness = min(1.0, base_brightness * (0.2 + 0.8 * energy))
+                    sat = min(1.0, base_sat + 0.1)
+                result.append((hue, sat, brightness))
 
             else:
                 # FREQ / MIRROR
@@ -1032,6 +1304,67 @@ class EffectEngine:
         return result
 
     # --- Public API ---
+
+    # --- Safe mode (Task 2.5) ---
+
+    @property
+    def safe_mode(self) -> bool:
+        """Whether safe mode is enabled."""
+        return self._safe_mode
+
+    def set_safe_mode(self, enabled: bool) -> None:
+        """Toggle safe mode on/off.
+
+        When enabled:
+        - Max flash rate drops to 2 Hz (from base value, typically 3 Hz)
+        - Brightness delta limit tightened to 30% per frame (from 40%)
+        - Flash intensity reduced by 30% (applied in beat flash section)
+
+        When disabled:
+        - All limits revert to their base values.
+        """
+        self._safe_mode = enabled
+        if enabled:
+            self._min_flash_interval = 1.0 / 2.0  # 2 Hz max
+        else:
+            self._min_flash_interval = 1.0 / max(self._base_max_flash_hz, 0.1)
+
+    # --- White flash mode (Task 2.16) ---
+
+    @property
+    def white_flash_mode(self) -> bool:
+        """Whether white flash mode is enabled."""
+        return self._white_flash_mode
+
+    def set_white_flash_mode(self, enabled: bool) -> None:
+        """Toggle white flash mode on/off.
+
+        When enabled, beat flash drives saturation to 0 (white light) instead
+        of using the current hue color, producing maximum perceived lumen
+        output from Hue bulbs.
+        """
+        self._white_flash_mode = enabled
+
+    # --- Manual flash/strobe triggers (Task 2.17) ---
+
+    def trigger_manual_flash(self) -> None:
+        """Queue a single manual flash (as if a beat was detected).
+
+        The flash will fire on the next engine tick, respecting the safety
+        limiter (max flash rate). If a flash is already pending, the request
+        is ignored to prevent queue buildup.
+        """
+        # Only queue if nothing is pending (prevent accumulation)
+        if self._manual_flash_pending == 0:
+            self._manual_flash_pending = 1
+
+    def trigger_manual_strobe(self) -> None:
+        """Queue a rapid strobe burst: 3 flashes at max rate, then stop.
+
+        Each flash respects the safety limiter. At 3 Hz max flash rate,
+        three flashes take about 1 second total.
+        """
+        self._manual_flash_pending = 3
 
     @property
     def reactive_weight(self) -> float:
@@ -1077,6 +1410,72 @@ class EffectEngine:
     def set_latency_compensation(self, ms: float) -> None:
         """Set latency compensation in milliseconds."""
         self._latency_compensation_sec = max(0.0, ms) / 1000.0
+
+    # --- Calibration delay (Task 2.6) ---
+
+    @property
+    def calibration_delay_ms(self) -> float:
+        """Current calibration delay in milliseconds (0-600)."""
+        return self._calibration_delay_sec * 1000.0
+
+    def set_calibration_delay(self, ms: float) -> None:
+        """Set manual calibration delay in milliseconds (0-600).
+
+        This adds to the base latency compensation for predictive beat triggering.
+        Total effective compensation = latency_compensation + calibration_delay.
+        More delay = earlier trigger = more lead time for light commands.
+
+        Args:
+            ms: Delay in milliseconds, clamped to 0-600.
+        """
+        self._calibration_delay_sec = max(0.0, min(600.0, ms)) / 1000.0
+
+    @property
+    def effective_latency_compensation_ms(self) -> float:
+        """Total effective latency compensation (base + calibration) in ms."""
+        return (
+            self._latency_compensation_sec + self._calibration_delay_sec
+        ) * 1000.0
+
+    # --- Brightness min/max (Task 2.8) ---
+
+    @property
+    def brightness_min(self) -> float:
+        """Minimum brightness floor (0-1)."""
+        return self._brightness_min
+
+    @property
+    def brightness_max(self) -> float:
+        """Maximum brightness cap (0-1)."""
+        return self._brightness_max
+
+    def set_brightness_min(self, value: float) -> None:
+        """Set minimum brightness floor (0.0-1.0).
+
+        Lights never go below this value. If min > max, max is raised to match.
+        Output brightness = min + (max - min) * raw_brightness.
+
+        Args:
+            value: Brightness floor, clamped to 0.0-1.0.
+        """
+        self._brightness_min = max(0.0, min(1.0, value))
+        # Ensure max >= min
+        if self._brightness_max < self._brightness_min:
+            self._brightness_max = self._brightness_min
+
+    def set_brightness_max(self, value: float) -> None:
+        """Set maximum brightness cap (0.0-1.0).
+
+        Lights never exceed this value. If max < min, min is lowered to match.
+        Output brightness = min + (max - min) * raw_brightness.
+
+        Args:
+            value: Brightness cap, clamped to 0.0-1.0.
+        """
+        self._brightness_max = max(0.0, min(1.0, value))
+        # Ensure min <= max
+        if self._brightness_min > self._brightness_max:
+            self._brightness_min = self._brightness_max
 
     def set_predictive_confidence_threshold(self, threshold: float) -> None:
         """Set minimum PLL confidence for predictive triggering (0-1)."""
@@ -1180,6 +1579,19 @@ class EffectEngine:
     def effects_size(self) -> float:
         """Current effects size (0.0 to 1.0)."""
         return self._effects_size
+
+    def set_saturation_boost(self, value: float) -> None:
+        """Set the saturation multiplier on the color mapper (Task 2.19).
+
+        Args:
+            value: 0.0 (grayscale) to 1.0 (full saturation).
+        """
+        self.color_mapper.set_saturation_boost(value)
+
+    @property
+    def saturation_boost(self) -> float:
+        """Current saturation multiplier (0.0 to 1.0)."""
+        return self.color_mapper.saturation_boost
 
     def set_effects_size(self, size: float) -> None:
         """Set the effects size: fraction of lights receiving reactive effects.
@@ -1294,6 +1706,8 @@ class EffectEngine:
         self._buildup_progress = 0.0
         self._breakdown_hue_shift = 0.0
         self._sparkle_last_lights = []
+        # Task 2.17: Reset manual flash queue
+        self._manual_flash_pending = 0
         # Task 1.13: Reset effects size rotation
         self._active_light_offset = 0
         self._update_active_lights()

@@ -27,6 +27,9 @@ class AudioFeatures:
     # Per-band energy (7 bands, normalized 0-1)
     band_energies: np.ndarray = field(default_factory=lambda: np.zeros(7))
 
+    # Mel-spaced band energies (32 bands, normalized 0-1)
+    mel_energies: np.ndarray = field(default_factory=lambda: np.zeros(32))
+
     # Spectral features
     spectral_centroid: float = 0.0  # Hz — "brightness" of sound
     spectral_flux: float = 0.0  # Rate of spectral change
@@ -92,6 +95,16 @@ class AudioAnalyzer:
         # Running normalization: track max energy per band over ~5 seconds
         self._band_max = np.ones(7) * 1e-6
         self._band_max_decay = 0.995  # Slow decay for auto-gain
+
+        # --- Mel filterbank (32 bands, 20 Hz to 20 kHz) ---
+        self._n_mel_bands = 32
+        self._mel_filterbank = self._compute_mel_filterbank(
+            n_filters=self._n_mel_bands,
+            f_min=20.0,
+            f_max=min(20000.0, sample_rate / 2.0),
+        )
+        self._mel_max = np.ones(self._n_mel_bands) * 1e-6
+        self._mel_max_decay = 0.995  # Same decay as 7-band system
 
         # Sliding-window RMS normalization (~5 seconds at ~43 fps)
         self._rms_window_size = int(5.0 * sample_rate / fft_size * 2)  # ~215 frames
@@ -176,6 +189,11 @@ class AudioAnalyzer:
         normalized[1] = min(normalized[1] * self.bass_boost, 1.5)  # bass
         features.band_energies = normalized
 
+        # --- Mel filterbank energies (32 perceptually-spaced bands) ---
+        raw_mel = self._mel_filterbank @ power
+        self._mel_max = np.maximum(raw_mel, self._mel_max * self._mel_max_decay)
+        features.mel_energies = raw_mel / (self._mel_max + 1e-10)
+
         # Spectral centroid: weighted mean frequency
         mag_sum = np.sum(magnitude)
         if mag_sum > 1e-10:
@@ -222,9 +240,70 @@ class AudioAnalyzer:
 
         return slices
 
+    def _compute_mel_filterbank(
+        self,
+        n_filters: int = 32,
+        f_min: float = 20.0,
+        f_max: float = 20000.0,
+    ) -> np.ndarray:
+        """Pre-compute Mel filterbank matrix (n_filters x n_fft_bins).
+
+        Creates overlapping triangular filters evenly spaced on the Mel scale.
+        Standard Mel formula: mel = 2595 * log10(1 + f / 700).
+
+        Args:
+            n_filters: Number of Mel bands.
+            f_min: Lowest filter center frequency (Hz).
+            f_max: Highest filter center frequency (Hz), capped at Nyquist.
+
+        Returns:
+            Filter matrix of shape (n_filters, fft_size // 2 + 1).
+        """
+        n_fft_bins = self.fft_size // 2 + 1
+
+        # Hz -> Mel conversion
+        def hz_to_mel(f: float) -> float:
+            return 2595.0 * np.log10(1.0 + f / 700.0)
+
+        # Mel -> Hz conversion
+        def mel_to_hz(m: float) -> float:
+            return 700.0 * (10.0 ** (m / 2595.0) - 1.0)
+
+        # Create n_filters + 2 evenly spaced points in Mel scale
+        # (extra 2 are the boundary points for the first and last filters)
+        mel_min = hz_to_mel(f_min)
+        mel_max = hz_to_mel(f_max)
+        mel_points = np.linspace(mel_min, mel_max, n_filters + 2)
+        hz_points = np.array([mel_to_hz(m) for m in mel_points])
+
+        # Convert Hz points to FFT bin indices
+        bin_points = np.round(hz_points * self.fft_size / self.sample_rate).astype(int)
+        bin_points = np.clip(bin_points, 0, n_fft_bins - 1)
+
+        # Build triangular filter matrix
+        filterbank = np.zeros((n_filters, n_fft_bins))
+
+        for i in range(n_filters):
+            left = bin_points[i]
+            center = bin_points[i + 1]
+            right = bin_points[i + 2]
+
+            # Rising slope: left -> center
+            if center > left:
+                for j in range(left, center + 1):
+                    filterbank[i, j] = (j - left) / (center - left)
+
+            # Falling slope: center -> right
+            if right > center:
+                for j in range(center, right + 1):
+                    filterbank[i, j] = (right - j) / (right - center)
+
+        return filterbank
+
     def reset(self) -> None:
         """Reset internal state (previous spectrum, normalization)."""
         self._prev_frame = None
         self._prev_magnitude = None
         self._band_max = np.ones(7) * 1e-6
+        self._mel_max = np.ones(self._n_mel_bands) * 1e-6
         self._rms_history.clear()

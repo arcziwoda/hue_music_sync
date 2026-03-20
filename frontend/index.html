@@ -400,6 +400,124 @@ body::after {
   background: var(--accent-dim);
 }
 
+/* Safe mode toggle (Task 2.5) */
+.btn-safe-mode {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  padding: 4px 10px;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.btn-safe-mode:hover {
+  border-color: var(--text-mid);
+  color: var(--text-mid);
+}
+
+.btn-safe-mode.active {
+  border-color: #ffaa00;
+  color: #ffaa00;
+  background: rgba(255, 170, 0, 0.12);
+}
+
+/* White flash toggle (Task 2.16) */
+.btn-white-flash {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  padding: 4px 10px;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.btn-white-flash:hover {
+  border-color: var(--text-mid);
+  color: var(--text-mid);
+}
+
+.btn-white-flash.active {
+  border-color: #ffffff;
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+/* Manual trigger buttons (Task 2.17) */
+.btn-trigger {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  padding: 4px 14px;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: all 0.08s;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.btn-trigger:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.btn-trigger:active {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  color: var(--accent);
+  transform: scale(0.96);
+}
+
+.btn-trigger.firing {
+  background: rgba(255, 255, 255, 0.2);
+  border-color: #ffffff;
+  color: #ffffff;
+}
+
+/* Preset save/load buttons (Task 2.18) */
+.btn-preset {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  padding: 4px 10px;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.btn-preset:hover {
+  border-color: var(--text-mid);
+  color: var(--text-mid);
+}
+
+.btn-preset.has-data {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.btn-preset.save-mode {
+  border-color: #ffaa00;
+  color: #ffaa00;
+  background: rgba(255, 170, 0, 0.12);
+}
+
 /* Beat pulse on BPM */
 .bpm-value.pulse {
   color: var(--accent);
@@ -523,6 +641,7 @@ body::after {
         <button data-mode="wave">WAVE</button>
         <button data-mode="mirror">MIRROR</button>
         <button data-mode="chase">CHASE</button>
+        <button data-mode="alternating">ALT</button>
       </div>
     </div>
     <div class="control">
@@ -554,6 +673,10 @@ body::after {
         <button data-fxsize="ALL" class="active">ALL</button>
       </div>
     </div>
+    <div class="control">
+      <label>SAFETY</label>
+      <button class="btn-safe-mode" id="btnSafeMode">SAFE MODE</button>
+    </div>
   </section>
 
   <section class="controls-row">
@@ -580,6 +703,61 @@ body::after {
         <button data-palette="dnb">DNB</button>
         <button data-palette="ambient">AMBIENT</button>
       </div>
+    </div>
+    <div class="control">
+      <label>GENERATE</label>
+      <div class="btn-group" id="paletteAlgoBtns">
+        <button data-algo="complementary">COMP</button>
+        <button data-algo="triadic">TRIAD</button>
+        <button data-algo="analogous">ANALOG</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="controls-row">
+    <div class="control">
+      <label>SATURATION</label>
+      <input type="range" id="ctrlSaturation" min="0" max="100" value="100" step="1">
+      <span class="control-val" id="valSaturation">100%</span>
+    </div>
+    <div class="control">
+      <label>MIN BRIGHT</label>
+      <input type="range" id="ctrlBrightMin" min="0" max="100" value="0" step="1">
+      <span class="control-val" id="valBrightMin">0%</span>
+    </div>
+    <div class="control">
+      <label>MAX BRIGHT</label>
+      <input type="range" id="ctrlBrightMax" min="0" max="100" value="100" step="1">
+      <span class="control-val" id="valBrightMax">100%</span>
+    </div>
+  </section>
+
+  <section class="controls-row">
+    <div class="control">
+      <label>CALIB DELAY</label>
+      <input type="range" id="ctrlCalibDelay" min="0" max="600" value="0" step="10">
+      <span class="control-val" id="valCalibDelay">0ms</span>
+    </div>
+  </section>
+
+  <section class="controls-row">
+    <div class="control">
+      <label>FLASH</label>
+      <button class="btn-white-flash" id="btnWhiteFlash">WHITE FLASH</button>
+    </div>
+    <div class="control">
+      <label>TRIGGER</label>
+      <button class="btn-trigger" id="btnFlash">FLASH</button>
+      <button class="btn-trigger" id="btnStrobe">STROBE</button>
+    </div>
+    <div class="control">
+      <label>PRESETS</label>
+      <button class="btn-preset" id="presetSave1" data-slot="1">SAVE 1</button>
+      <button class="btn-preset" id="presetSave2" data-slot="2">SAVE 2</button>
+      <button class="btn-preset" id="presetSave3" data-slot="3">SAVE 3</button>
+      <button class="btn-preset" id="presetLoad1" data-slot="1">LOAD 1</button>
+      <button class="btn-preset" id="presetLoad2" data-slot="2">LOAD 2</button>
+      <button class="btn-preset" id="presetLoad3" data-slot="3">LOAD 3</button>
     </div>
   </section>
 </div>
@@ -749,9 +927,19 @@ function syncUIState(d) {
   }
   if (d.palette) {
     var paletteBtns = document.querySelectorAll('#paletteBtns button');
+    var algoBtns = document.querySelectorAll('#paletteAlgoBtns button');
+    var isAlgoPalette = d.palette && d.palette.indexOf('algo:') === 0;
     paletteBtns.forEach(function(b) {
-      b.classList.toggle('active', b.dataset.palette === d.palette);
+      b.classList.toggle('active', !isAlgoPalette && b.dataset.palette === d.palette);
     });
+    if (isAlgoPalette) {
+      var algoMode = d.palette.replace('algo:', '');
+      algoBtns.forEach(function(b) {
+        b.classList.toggle('active', b.dataset.algo === algoMode);
+      });
+    } else {
+      algoBtns.forEach(function(b) { b.classList.remove('active'); });
+    }
   }
   if (d.color_mode) {
     var colorModeBtns = document.querySelectorAll('#colorModeBtns button');
@@ -781,6 +969,18 @@ function syncUIState(d) {
     });
   }
 
+  // Safe mode sync (Task 2.5)
+  if (typeof d.safe_mode === 'boolean') {
+    var $sm = document.getElementById('btnSafeMode');
+    if ($sm) $sm.classList.toggle('active', d.safe_mode);
+  }
+
+  // White flash mode sync (Task 2.16)
+  if (typeof d.white_flash === 'boolean') {
+    var $wf = document.getElementById('btnWhiteFlash');
+    if ($wf) $wf.classList.toggle('active', d.white_flash);
+  }
+
   // Sync sliders only once per connection to avoid overriding user dragging
   if (!_uiSynced) {
     _uiSynced = true;
@@ -801,6 +1001,35 @@ function syncUIState(d) {
       var $cdV = document.getElementById('valCooldown');
       $cd.value = d.cooldown_ms;
       $cdV.textContent = Math.round(d.cooldown_ms).toString();
+    }
+    if (typeof d.saturation_boost === 'number') {
+      var $sat = document.getElementById('ctrlSaturation');
+      var $satV = document.getElementById('valSaturation');
+      var pct = Math.round(d.saturation_boost * 100);
+      $sat.value = pct;
+      $satV.textContent = pct + '%';
+    }
+    // Task 2.6: Calibration delay sync
+    if (typeof d.calibration_delay === 'number') {
+      var $calib = document.getElementById('ctrlCalibDelay');
+      var $calibV = document.getElementById('valCalibDelay');
+      $calib.value = d.calibration_delay;
+      $calibV.textContent = Math.round(d.calibration_delay) + 'ms';
+    }
+    // Task 2.8: Brightness min/max sync
+    if (typeof d.brightness_min === 'number') {
+      var $bMin = document.getElementById('ctrlBrightMin');
+      var $bMinV = document.getElementById('valBrightMin');
+      var pctMin = Math.round(d.brightness_min * 100);
+      $bMin.value = pctMin;
+      $bMinV.textContent = pctMin + '%';
+    }
+    if (typeof d.brightness_max === 'number') {
+      var $bMax = document.getElementById('ctrlBrightMax');
+      var $bMaxV = document.getElementById('valBrightMax');
+      var pctMax = Math.round(d.brightness_max * 100);
+      $bMax.value = pctMax;
+      $bMaxV.textContent = pctMax + '%';
     }
   }
 }
@@ -1151,6 +1380,335 @@ function initControls() {
       send('set_effects_size_preset', btn.dataset.fxsize);
     });
   });
+
+  // Safe mode toggle (Task 2.5)
+  var $safeMode = document.getElementById('btnSafeMode');
+  $safeMode.addEventListener('click', function() {
+    var isActive = $safeMode.classList.toggle('active');
+    send('set_safe_mode', isActive);
+  });
+
+  // Algorithmic palette generation buttons (Task 2.10)
+  var algoBtns = document.querySelectorAll('#paletteAlgoBtns button');
+  algoBtns.forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      // Generate a random base hue (0-360) for variety on each click
+      var baseHue = Math.round(Math.random() * 360);
+      var algo = btn.dataset.algo;
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          type: 'set_palette_algo',
+          mode: algo,
+          base_hue: baseHue
+        }));
+      }
+      // Clear active state from curated palette buttons
+      var paletteBtns = document.querySelectorAll('#paletteBtns button');
+      paletteBtns.forEach(function(b) { b.classList.remove('active'); });
+      // Highlight the clicked algo button
+      algoBtns.forEach(function(b) { b.classList.remove('active'); });
+      btn.classList.add('active');
+    });
+  });
+
+  // Saturation slider (Task 2.19)
+  var $sat = document.getElementById('ctrlSaturation');
+  var $satV = document.getElementById('valSaturation');
+  $sat.addEventListener('input', function() {
+    var pct = parseInt($sat.value);
+    $satV.textContent = pct + '%';
+    send('set_saturation', pct / 100);
+  });
+
+  // Brightness min/max sliders (Task 2.8)
+  var $brightMin = document.getElementById('ctrlBrightMin');
+  var $brightMinV = document.getElementById('valBrightMin');
+  $brightMin.addEventListener('input', function() {
+    var pct = parseInt($brightMin.value);
+    $brightMinV.textContent = pct + '%';
+    send('set_brightness_min', pct / 100);
+    // Enforce min <= max
+    var $brightMax = document.getElementById('ctrlBrightMax');
+    if (parseInt($brightMin.value) > parseInt($brightMax.value)) {
+      $brightMax.value = $brightMin.value;
+      document.getElementById('valBrightMax').textContent = pct + '%';
+      send('set_brightness_max', pct / 100);
+    }
+  });
+
+  var $brightMax = document.getElementById('ctrlBrightMax');
+  var $brightMaxV = document.getElementById('valBrightMax');
+  $brightMax.addEventListener('input', function() {
+    var pct = parseInt($brightMax.value);
+    $brightMaxV.textContent = pct + '%';
+    send('set_brightness_max', pct / 100);
+    // Enforce max >= min
+    var $brightMin = document.getElementById('ctrlBrightMin');
+    if (parseInt($brightMax.value) < parseInt($brightMin.value)) {
+      $brightMin.value = $brightMax.value;
+      document.getElementById('valBrightMin').textContent = pct + '%';
+      send('set_brightness_min', pct / 100);
+    }
+  });
+
+  // Calibration delay slider (Task 2.6)
+  var $calib = document.getElementById('ctrlCalibDelay');
+  var $calibV = document.getElementById('valCalibDelay');
+  $calib.addEventListener('input', function() {
+    var ms = parseInt($calib.value);
+    $calibV.textContent = ms + 'ms';
+    send('set_calibration_delay', ms);
+  });
+
+  // White flash toggle (Task 2.16)
+  var $whiteFlash = document.getElementById('btnWhiteFlash');
+  $whiteFlash.addEventListener('click', function() {
+    var isActive = $whiteFlash.classList.toggle('active');
+    send('set_white_flash', isActive);
+  });
+
+  // Manual flash trigger (Task 2.17)
+  var $btnFlash = document.getElementById('btnFlash');
+  $btnFlash.addEventListener('click', function() {
+    send('trigger_flash', true);
+    $btnFlash.classList.add('firing');
+    setTimeout(function() { $btnFlash.classList.remove('firing'); }, 150);
+  });
+
+  // Manual strobe trigger (Task 2.17)
+  var $btnStrobe = document.getElementById('btnStrobe');
+  $btnStrobe.addEventListener('click', function() {
+    send('trigger_strobe', true);
+    $btnStrobe.classList.add('firing');
+    setTimeout(function() { $btnStrobe.classList.remove('firing'); }, 800);
+  });
+
+  // Preset save/load (Task 2.18) — uses localStorage
+  initPresets();
+}
+
+// --- Preset save/load (Task 2.18) ---
+var PRESET_KEY_PREFIX = 'hue_vis_preset_';
+
+function _collectCurrentState() {
+  // Collect the current UI state from DOM (buttons + sliders)
+  var state = {};
+
+  // Genre
+  var activeGenre = document.querySelector('#genreBtns button.active');
+  state.genre = activeGenre ? activeGenre.dataset.genre : 'techno';
+
+  // Spatial mode
+  var activeSpatial = document.querySelector('#spatialBtns button.active');
+  state.spatial_mode = activeSpatial ? activeSpatial.dataset.mode : 'frequency_zones';
+
+  // Intensity
+  var activeIntensity = document.querySelector('#intensityBtns button.active');
+  state.intensity = activeIntensity ? activeIntensity.dataset.intensity : 'normal';
+
+  // Palette (curated or algo)
+  var activePalette = document.querySelector('#paletteBtns button.active');
+  var activeAlgo = document.querySelector('#paletteAlgoBtns button.active');
+  if (activePalette) {
+    state.palette = activePalette.dataset.palette;
+    state.palette_type = 'curated';
+  } else if (activeAlgo) {
+    state.palette_algo = activeAlgo.dataset.algo;
+    state.palette_type = 'algo';
+  } else {
+    state.palette = 'neon';
+    state.palette_type = 'curated';
+  }
+
+  // Color mode
+  var activeColor = document.querySelector('#colorModeBtns button.active');
+  state.color_mode = activeColor ? activeColor.dataset.mode : 'palette';
+
+  // Effects size
+  var activeFx = document.querySelector('#effectsSizeBtns button.active');
+  state.effects_size = activeFx ? activeFx.dataset.fxsize : 'ALL';
+
+  // Sliders
+  state.sensitivity = document.getElementById('ctrlSensitivity').value;
+  state.bass_boost = document.getElementById('ctrlBassBoost').value;
+  state.cooldown = document.getElementById('ctrlCooldown').value;
+  state.saturation = document.getElementById('ctrlSaturation').value;
+  state.brightness_min = document.getElementById('ctrlBrightMin').value;
+  state.brightness_max = document.getElementById('ctrlBrightMax').value;
+  state.calibration_delay = document.getElementById('ctrlCalibDelay').value;
+
+  // Toggles
+  state.safe_mode = document.getElementById('btnSafeMode').classList.contains('active');
+  state.white_flash = document.getElementById('btnWhiteFlash').classList.contains('active');
+
+  return state;
+}
+
+function _restoreState(state) {
+  if (!state) return;
+
+  // Genre
+  if (state.genre) {
+    send('set_genre', state.genre);
+  }
+
+  // Spatial mode
+  if (state.spatial_mode) {
+    send('set_spatial_mode', state.spatial_mode);
+  }
+
+  // Intensity
+  if (state.intensity) {
+    send('set_intensity', state.intensity);
+  }
+
+  // Palette
+  if (state.palette_type === 'algo' && state.palette_algo) {
+    var baseHue = Math.round(Math.random() * 360);
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: 'set_palette_algo',
+        mode: state.palette_algo,
+        base_hue: baseHue
+      }));
+    }
+  } else if (state.palette) {
+    send('set_palette', state.palette);
+  }
+
+  // Color mode
+  if (state.color_mode) {
+    send('set_color_mode', state.color_mode);
+  }
+
+  // Effects size
+  if (state.effects_size) {
+    send('set_effects_size_preset', state.effects_size);
+  }
+
+  // Sliders
+  if (state.sensitivity) {
+    var $sens = document.getElementById('ctrlSensitivity');
+    var $sensV = document.getElementById('valSensitivity');
+    $sens.value = state.sensitivity;
+    var v = ($sens.value / 10).toFixed(1);
+    $sensV.textContent = v;
+    send('set_sensitivity', parseFloat(v));
+  }
+  if (state.bass_boost) {
+    var $bass = document.getElementById('ctrlBassBoost');
+    var $bassV = document.getElementById('valBassBoost');
+    $bass.value = state.bass_boost;
+    var v = ($bass.value / 10).toFixed(1);
+    $bassV.textContent = v;
+    send('set_bass_boost', parseFloat(v));
+  }
+  if (state.cooldown) {
+    var $cd = document.getElementById('ctrlCooldown');
+    var $cdV = document.getElementById('valCooldown');
+    $cd.value = state.cooldown;
+    $cdV.textContent = state.cooldown;
+    send('set_cooldown', parseInt(state.cooldown));
+  }
+  if (state.saturation) {
+    var $sat = document.getElementById('ctrlSaturation');
+    var $satV = document.getElementById('valSaturation');
+    $sat.value = state.saturation;
+    var pct = parseInt(state.saturation);
+    $satV.textContent = pct + '%';
+    send('set_saturation', pct / 100);
+  }
+  // Task 2.8: Brightness min/max
+  if (state.brightness_min !== undefined) {
+    var $bMin = document.getElementById('ctrlBrightMin');
+    var $bMinV = document.getElementById('valBrightMin');
+    $bMin.value = state.brightness_min;
+    var pctMin = parseInt(state.brightness_min);
+    $bMinV.textContent = pctMin + '%';
+    send('set_brightness_min', pctMin / 100);
+  }
+  if (state.brightness_max !== undefined) {
+    var $bMax = document.getElementById('ctrlBrightMax');
+    var $bMaxV = document.getElementById('valBrightMax');
+    $bMax.value = state.brightness_max;
+    var pctMax = parseInt(state.brightness_max);
+    $bMaxV.textContent = pctMax + '%';
+    send('set_brightness_max', pctMax / 100);
+  }
+  // Task 2.6: Calibration delay
+  if (state.calibration_delay !== undefined) {
+    var $calib = document.getElementById('ctrlCalibDelay');
+    var $calibV = document.getElementById('valCalibDelay');
+    $calib.value = state.calibration_delay;
+    $calibV.textContent = parseInt(state.calibration_delay) + 'ms';
+    send('set_calibration_delay', parseInt(state.calibration_delay));
+  }
+
+  // Toggles
+  if (typeof state.safe_mode === 'boolean') {
+    var $sm = document.getElementById('btnSafeMode');
+    if (state.safe_mode !== $sm.classList.contains('active')) {
+      $sm.classList.toggle('active');
+      send('set_safe_mode', state.safe_mode);
+    }
+  }
+  if (typeof state.white_flash === 'boolean') {
+    var $wf = document.getElementById('btnWhiteFlash');
+    if (state.white_flash !== $wf.classList.contains('active')) {
+      $wf.classList.toggle('active');
+      send('set_white_flash', state.white_flash);
+    }
+  }
+}
+
+function _updatePresetButtonStates() {
+  for (var slot = 1; slot <= 3; slot++) {
+    var data = localStorage.getItem(PRESET_KEY_PREFIX + slot);
+    var $load = document.getElementById('presetLoad' + slot);
+    if ($load) {
+      $load.classList.toggle('has-data', !!data);
+    }
+  }
+}
+
+function initPresets() {
+  // Save buttons
+  for (var slot = 1; slot <= 3; slot++) {
+    (function(s) {
+      var $save = document.getElementById('presetSave' + s);
+      $save.addEventListener('click', function() {
+        var state = _collectCurrentState();
+        localStorage.setItem(PRESET_KEY_PREFIX + s, JSON.stringify(state));
+        // Visual feedback
+        $save.classList.add('save-mode');
+        setTimeout(function() { $save.classList.remove('save-mode'); }, 400);
+        _updatePresetButtonStates();
+      });
+    })(slot);
+  }
+
+  // Load buttons
+  for (var slot = 1; slot <= 3; slot++) {
+    (function(s) {
+      var $load = document.getElementById('presetLoad' + s);
+      $load.addEventListener('click', function() {
+        var raw = localStorage.getItem(PRESET_KEY_PREFIX + s);
+        if (!raw) return;
+        try {
+          var state = JSON.parse(raw);
+          _restoreState(state);
+          // Visual feedback
+          $load.classList.add('save-mode');
+          setTimeout(function() { $load.classList.remove('save-mode'); }, 400);
+        } catch (e) {
+          console.error('Failed to load preset ' + s, e);
+        }
+      });
+    })(slot);
+  }
+
+  // Set initial button states
+  _updatePresetButtonStates();
 }
 
 // Init
