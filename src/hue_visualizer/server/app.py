@@ -244,6 +244,7 @@ class AudioPipeline:
         # Build features with peak values overlaid on the latest frame
         peak_features = AudioFeatures(
             band_energies=self._peak_band_energies.copy(),
+            band_energies_raw=self.features.band_energies_raw,
             spectral_centroid=self.features.spectral_centroid,
             spectral_flux=self._peak_spectral_flux,
             spectral_rolloff=self.features.spectral_rolloff,
@@ -379,7 +380,7 @@ async def audio_loop():
                 data = {
                     "type": "audio",
                     "spectrum": _prepare_spectrum(f.spectrum),
-                    "bands": [round(v, 4) for v in f.band_energies.tolist()],
+                    "bands": [round(v, 4) for v in f.band_energies_raw.tolist()],
                     "band_names": BAND_NAMES,
                     "beat": {
                         "is_beat": had_beat,
@@ -420,8 +421,9 @@ async def audio_loop():
                     data["safe_mode"] = effect_engine.safe_mode
                     # Task 2.19: Saturation boost state
                     data["saturation_boost"] = round(effect_engine.saturation_boost, 2)
-                    # Task 2.16: White flash mode state
-                    data["white_flash"] = effect_engine.white_flash_mode
+                    # Strobe state
+                    data["strobe_enabled"] = effect_engine.strobe_enabled
+                    data["strobe_active"] = effect_engine.strobe_active
                     # Calibration mode state
                     data["calibration_mode"] = effect_engine.calibration_mode
                     # Task 2.6: Calibration delay state
@@ -950,21 +952,18 @@ def _handle_control(msg: dict):
         effect_engine.set_saturation_boost(v)
         logger.info(f"Saturation boost -> {v:.2f}")
 
-    elif t == "set_white_flash" and effect_engine:
-        # Task 2.16: White flash mode toggle
+    elif t == "set_strobe_enabled" and effect_engine:
         enabled = bool(msg.get("value", False))
-        effect_engine.set_white_flash_mode(enabled)
-        logger.info(f"White flash mode -> {'ON' if enabled else 'OFF'}")
+        effect_engine.set_strobe_enabled(enabled)
+        logger.info(f"Auto strobe -> {'ON' if enabled else 'OFF'}")
 
     elif t == "trigger_flash" and effect_engine:
-        # Task 2.17: Manual single flash
         effect_engine.trigger_manual_flash()
         logger.info("Manual flash triggered")
 
     elif t == "trigger_strobe" and effect_engine:
-        # Task 2.17: Manual strobe burst (3 flashes)
         effect_engine.trigger_manual_strobe()
-        logger.info("Manual strobe triggered")
+        logger.info("Manual strobe burst triggered")
 
     elif t == "set_calibration_mode" and effect_engine:
         enabled = bool(msg.get("value", False))
@@ -1029,6 +1028,7 @@ def _apply_genre_preset(genre: str) -> None:
         effect_engine.set_spatial_mode(preset.spatial_mode)
         effect_engine.set_flash_tau(preset.flash_tau)
         effect_engine.set_hue_drift_speed(preset.hue_drift_speed)
+        effect_engine.set_strobe_frequency(preset.strobe_frequency)
 
         # Apply genre's default palette (Task 1.11)
         palette = PALETTES.get(preset.default_palette)

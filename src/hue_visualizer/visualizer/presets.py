@@ -113,6 +113,8 @@ class GenrePreset:
     hue_drift_speed: float
     # Default palette name (key into PALETTES dict)
     default_palette: str = "neon"
+    # Strobe frequency in Hz (auto-strobe burst speed)
+    strobe_frequency: float = 6.0
 
 
 PRESETS: dict[str, GenrePreset] = {
@@ -128,6 +130,7 @@ PRESETS: dict[str, GenrePreset] = {
         flash_tau=0.20,  # Snappy — 200ms decay
         hue_drift_speed=4.0,
         default_palette="techno",  # deep purple, midnight blue, blood red
+        strobe_frequency=7.0,  # Fast club strobe (safe mode clamps to 2 Hz)
     ),
     "house": GenrePreset(
         name="house",
@@ -141,6 +144,7 @@ PRESETS: dict[str, GenrePreset] = {
         flash_tau=0.30,  # Warm glow — 300ms decay
         hue_drift_speed=8.0,
         default_palette="house",  # warm amber, coral, cyan
+        strobe_frequency=5.0,  # Moderate strobe
     ),
     "dnb": GenrePreset(
         name="dnb",
@@ -154,6 +158,7 @@ PRESETS: dict[str, GenrePreset] = {
         flash_tau=0.15,  # Very snappy — 150ms for fast beats
         hue_drift_speed=10.0,
         default_palette="dnb",  # neon green, yellow, electric blue
+        strobe_frequency=6.0,  # Fast — DnB energy
     ),
     "ambient": GenrePreset(
         name="ambient",
@@ -167,6 +172,7 @@ PRESETS: dict[str, GenrePreset] = {
         flash_tau=0.50,  # Slow gentle pulse — 500ms
         hue_drift_speed=2.0,
         default_palette="ambient",  # ice blue, lavender, soft sky
+        strobe_frequency=3.0,  # Gentle pulse
     ),
 }
 

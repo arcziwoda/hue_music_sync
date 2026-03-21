@@ -24,8 +24,10 @@ BAND_NAMES = list(FREQUENCY_BANDS.keys())
 class AudioFeatures:
     """All extracted audio features for a single frame."""
 
-    # Per-band energy (7 bands, normalized 0-1)
+    # Per-band energy (7 bands, normalized 0-1, bass-boosted for effects)
     band_energies: np.ndarray = field(default_factory=lambda: np.zeros(7))
+    # Per-band energy WITHOUT bass boost (for UI visualization)
+    band_energies_raw: np.ndarray = field(default_factory=lambda: np.zeros(7))
 
     # Mel-spaced band energies (32 bands, normalized 0-1)
     mel_energies: np.ndarray = field(default_factory=lambda: np.zeros(32))
@@ -185,8 +187,11 @@ class AudioAnalyzer:
         )
         normalized = raw_energies / (self._band_max + 1e-10)
 
+        # Store raw (pre-boost) for UI visualization
+        features.band_energies_raw = normalized.copy()
+
         # Apply bass boost AFTER normalization (Fletcher-Munson compensation)
-        # This makes bass visually stronger relative to other bands
+        # This makes bass stronger relative to other bands for the effect engine
         normalized[0] = min(normalized[0] * self.bass_boost, 1.5)  # sub-bass
         normalized[1] = min(normalized[1] * self.bass_boost, 1.5)  # bass
         features.band_energies = normalized

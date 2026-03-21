@@ -526,14 +526,23 @@ class EffectEngine:
         self._group_phase_offsets: list[float] = []
         self._compute_light_groups()
 
-        # --- White flash mode (Task 2.16) ---
-        # When enabled, beat flash uses white (saturation=0, brightness=1.0)
-        # instead of the current color, for maximum lumen output from bulbs.
-        self._white_flash_mode: bool = False
-
-        # --- Manual strobe trigger (Task 2.17) ---
+        # --- Manual flash trigger (Task 2.17) ---
         # Pending manual flash count: decremented each time a flash is fired.
         self._manual_flash_pending: int = 0
+
+        # --- Strobe system ---
+        # Toggle: when enabled, auto-strobe fires on drops and high energy.
+        # Manual burst always works regardless of this toggle.
+        self._strobe_enabled: bool = False
+        self._strobe_active: bool = False           # Is a strobe burst in progress?
+        self._strobe_phase: float = 0.0             # 0-1 within current on/off cycle
+        self._strobe_remaining_cycles: int = 0      # Cycles left in current burst
+        self._strobe_base_frequency: float = 6.0     # Base frequency (set by presets)
+        self._strobe_frequency: float = 6.0         # Active frequency (may be clamped by safe mode)
+        self._strobe_max_frequency: float = 8.0     # Physical max (~12.5 FPS bulb limit)
+        self._strobe_duty_cycle: float = 0.3        # 30% on, 70% off — sharp punchy flash
+        self._strobe_drop_cycles: int = 8           # Cycles for drop burst
+        self._strobe_manual_cycles: int = 6         # Cycles for manual burst
 
         # --- Calibration mode ---
         # When active, tick() bypasses the full pipeline and outputs a simple
@@ -580,6 +589,10 @@ class EffectEngine:
         if self._calibration_mode:
             return self._tick_calibration(features, beat_info, dt, now)
 
+        # --- Strobe mode: bypass full pipeline ---
+        if self._strobe_active:
+            return self._tick_strobe(features, beat_info, dt, now, section_info)
+
         # --- Predictive beat triggering (Task 0.4) ---
         trigger_beat, beat_strength = self._resolve_beat_trigger(
             beat_info, now
@@ -600,6 +613,14 @@ class EffectEngine:
         self._energy_level = _ema(
             self._energy_level, energy_raw, self._energy_smooth_alpha
         )
+
+        # --- Auto-strobe triggers (gated by _strobe_enabled) ---
+        if self._strobe_enabled and not self._strobe_active:
+            # Drop strobe: on transition to DROP, fire a long burst
+            if section.section == Section.DROP and prev_section != Section.DROP:
+                self.trigger_strobe_burst(self._strobe_drop_cycles)
+                self._drop_flash_pending = False  # Consumed by strobe
+                return self._tick_strobe(features, beat_info, dt, now, section_info)
 
         # Map energy to reactive weight: silence -> min_reactive, loud -> max_reactive
         reactive_weight = (
@@ -861,23 +882,17 @@ class EffectEngine:
             light.brightness = _ema(light.brightness, combined_b, b_alpha)
 
             # --- Step 2: Safety limiter (Task 2.9: red -> orange shift) ---
-            any_flash_active = (
-                light.flash_brightness > 0.3
-                or light.bass_pulse_brightness > 0.3
-            )
-            is_red = light.hue < 15 or light.hue > 345
-            if is_red and light.saturation > 0.8 and any_flash_active:
-                # Task 2.9: Shift hue toward orange (25-30 deg) instead of
-                # just desaturating. Orange is visually pleasing and safe.
-                if light.hue < 15:
-                    # Hue is 0-15: shift toward 28
-                    light.hue = 28.0
-                else:
-                    # Hue is 345-360: shift toward 28 (wrap through 0)
-                    light.hue = 28.0
-            elif is_red and any_flash_active:
-                # Lower saturation reds (0.5-0.8) — keep legacy desaturation
-                light.saturation = min(light.saturation, 0.7)
+            # Only active in safe mode. When safe mode is off, red strobe is allowed.
+            if self._safe_mode:
+                any_flash_active = (
+                    light.flash_brightness > 0.3
+                    or light.bass_pulse_brightness > 0.3
+                )
+                is_red = light.hue < 15 or light.hue > 345
+                if is_red and light.saturation > 0.8 and any_flash_active:
+                    light.hue = 28.0  # Shift to orange
+                elif is_red and any_flash_active:
+                    light.saturation = min(light.saturation, 0.7)
 
             # --- Step 3: Brightness delta limiting (Task 2.3) ---
             # Clamp max brightness change per frame. Beat flash onset is exempt.
@@ -925,13 +940,6 @@ class EffectEngine:
                 self._brightness_min
                 + (self._brightness_max - self._brightness_min) * out_b
             )
-
-            # Task 2.16: White flash mode — override AFTER smoothing.
-            # When flash is active, hard-set to white (bypass EMA on saturation)
-            # so the flash is immediately white, not smoothed from a color.
-            if self._white_flash_mode and light.flash_brightness > 0.05:
-                out_s = 0.0
-                final_b = max(final_b, light.flash_brightness * reactive_scale)
 
             x, y = hsv_to_xy(out_h, out_s, 1.0)
             light_states.append(
@@ -1079,11 +1087,89 @@ class EffectEngine:
             self._brightness_max - self._brightness_min
         ) * b
 
+        # Update per-light state so UI preview reflects calibration flashes
+        for light in self._lights:
+            light.hue = 0.0
+            light.saturation = 0.0
+            light.brightness = final_b
+
         x, y = hsv_to_xy(0.0, 0.0, 1.0)  # White chromaticity
         return [
             LightState(x=x, y=y, brightness=final_b, light_id=i)
             for i in range(self.num_lights)
         ]
+
+    # --- Strobe mode ---
+
+    def _tick_strobe(
+        self,
+        features: AudioFeatures,
+        beat_info: BeatInfo,
+        dt: float,
+        now: float,
+        section_info: SectionInfo | None = None,
+    ) -> list[LightState]:
+        """Strobe tick: alternating white/black, bypasses main pipeline.
+
+        While active, the generative layer and energy tracking keep ticking
+        silently so that resuming normal mode is seamless (no phase jump).
+        """
+        # Keep generative layer ticking so phases don't stall
+        self._generative.tick(dt, bpm=beat_info.bpm, energy_level=self._energy_level)
+
+        # Update energy level so energy strobe threshold stays calibrated
+        energy_raw = min(1.0, features.rms * 2.0)
+        self._energy_level = _ema(
+            self._energy_level, energy_raw, self._energy_smooth_alpha
+        )
+
+        # Advance strobe phase
+        self._strobe_phase += dt * self._strobe_frequency
+
+        # Cycle complete?
+        if self._strobe_phase >= 1.0:
+            self._strobe_phase -= 1.0
+            self._strobe_remaining_cycles -= 1
+            if self._strobe_remaining_cycles <= 0:
+                # Burst finished — return to normal pipeline
+                self._strobe_active = False
+                self._last_any_flash_time = now
+                self._last_flash_time = now
+                for light in self._lights:
+                    light.flash_brightness = 0.0
+                # Run normal tick for this frame (smooth resume)
+                return self.tick(features, beat_info, dt, now, section_info)
+
+        # On/off: duty cycle determines on-phase fraction (e.g. 0.3 = 30% on, 70% off)
+        is_on = self._strobe_phase < self._strobe_duty_cycle
+        if is_on:
+            out_b = self._brightness_min + (
+                self._brightness_max - self._brightness_min
+            )
+        else:
+            out_b = self._brightness_min  # True black (or user's floor)
+
+        # Update per-light smoothed state so UI preview reflects strobe
+        for light in self._lights:
+            light.hue = 0.0
+            light.saturation = 0.0
+            light.brightness = out_b
+
+        x, y = hsv_to_xy(0.0, 0.0, 1.0)  # White chromaticity
+        return [
+            LightState(x=x, y=y, brightness=out_b, light_id=i)
+            for i in range(self.num_lights)
+        ]
+
+    def trigger_strobe_burst(self, cycles: int) -> None:
+        """Start (or restart) a strobe burst with given number of on/off cycles."""
+        freq = min(self._strobe_frequency, self._strobe_max_frequency)
+        if self._safe_mode:
+            freq = min(freq, 2.0)
+        self._strobe_frequency = freq
+        self._strobe_active = True
+        self._strobe_phase = 0.0
+        self._strobe_remaining_cycles = cycles
 
     @property
     def calibration_mode(self) -> bool:
@@ -1427,25 +1513,17 @@ class EffectEngine:
         """
         self._safe_mode = enabled
         if enabled:
-            self._min_flash_interval = 1.0 / 2.0  # 2 Hz max
+            # Safe mode: epilepsy-safe limits
+            self._min_flash_interval = 1.0 / 2.0  # 2 Hz max flash rate
+            self._strobe_max_frequency = 2.0       # 2 Hz max strobe
+            self._strobe_frequency = min(self._strobe_frequency, 2.0)
+            self._strobe_duty_cycle = 0.5          # 50% duty — gentler
         else:
-            self._min_flash_interval = 1.0 / max(self._base_max_flash_hz, 0.1)
-
-    # --- White flash mode (Task 2.16) ---
-
-    @property
-    def white_flash_mode(self) -> bool:
-        """Whether white flash mode is enabled."""
-        return self._white_flash_mode
-
-    def set_white_flash_mode(self, enabled: bool) -> None:
-        """Toggle white flash mode on/off.
-
-        When enabled, beat flash drives saturation to 0 (white light) instead
-        of using the current hue color, producing maximum perceived lumen
-        output from Hue bulbs.
-        """
-        self._white_flash_mode = enabled
+            # Normal mode: no epilepsy limits, physical bulb limits only
+            self._min_flash_interval = 0.0         # No flash rate limit
+            self._strobe_max_frequency = 8.0       # ~12.5 FPS bulb limit
+            self._strobe_frequency = min(self._strobe_base_frequency, 8.0)  # Restore
+            self._strobe_duty_cycle = 0.3          # 30% duty — sharp punchy
 
     # --- Manual flash/strobe triggers (Task 2.17) ---
 
@@ -1461,12 +1539,33 @@ class EffectEngine:
             self._manual_flash_pending = 1
 
     def trigger_manual_strobe(self) -> None:
-        """Queue a rapid strobe burst: 3 flashes at max rate, then stop.
+        """Trigger a manual strobe burst (always white, always works).
 
-        Each flash respects the safety limiter. At 3 Hz max flash rate,
-        three flashes take about 1 second total.
+        Fires a proper strobe with dark phases between white flashes.
+        Works regardless of strobe_enabled toggle.
         """
-        self._manual_flash_pending = 3
+        self.trigger_strobe_burst(self._strobe_manual_cycles)
+
+    # --- Strobe public API ---
+
+    @property
+    def strobe_enabled(self) -> bool:
+        """Whether auto-strobe is enabled (drop + energy triggers)."""
+        return self._strobe_enabled
+
+    def set_strobe_enabled(self, enabled: bool) -> None:
+        """Toggle auto-strobe on/off."""
+        self._strobe_enabled = enabled
+
+    @property
+    def strobe_active(self) -> bool:
+        """Whether a strobe burst is currently in progress."""
+        return self._strobe_active
+
+    def set_strobe_frequency(self, hz: float) -> None:
+        """Set strobe frequency in Hz (clamped to safety limits)."""
+        self._strobe_base_frequency = max(0.5, hz)
+        self._strobe_frequency = max(0.5, min(self._strobe_max_frequency, hz))
 
     @property
     def reactive_weight(self) -> float:
@@ -1832,6 +1931,10 @@ class EffectEngine:
         self._sparkle_last_lights = []
         # Task 2.17: Reset manual flash queue
         self._manual_flash_pending = 0
+        # Strobe state
+        self._strobe_active = False
+        self._strobe_phase = 0.0
+        self._strobe_remaining_cycles = 0
         # Task 1.13: Reset effects size rotation
         self._active_light_offset = 0
         self._update_active_lights()

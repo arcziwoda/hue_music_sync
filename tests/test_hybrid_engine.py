@@ -576,8 +576,9 @@ class TestHybridSafety:
             "Flash rate limiter should prevent the second flash"
 
     def test_no_strobe_red_preserved(self):
-        """Safety: no strobe saturated red should still work."""
+        """Safety: no strobe saturated red should still work (safe mode)."""
         engine = EffectEngine(num_lights=3, max_flash_hz=10.0)
+        engine.set_safe_mode(True)  # Red protection only in safe mode
         # Set palette to pure red
         engine.set_palette((0.0, 5.0, 355.0))
 

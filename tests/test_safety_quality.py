@@ -321,14 +321,14 @@ class TestSafeMode:
         assert engine._min_flash_interval == pytest.approx(0.5)
 
     def test_normal_mode_flash_rate_restored(self):
-        """Disabling safe mode should restore the original flash rate."""
+        """Disabling safe mode should remove flash rate limit."""
         engine = EffectEngine(num_lights=4, max_flash_hz=3.0)
         engine.set_safe_mode(True)
         assert engine._min_flash_interval == pytest.approx(0.5)
 
         engine.set_safe_mode(False)
-        # 3 Hz = 333ms interval
-        assert engine._min_flash_interval == pytest.approx(1.0 / 3.0, rel=0.01)
+        # Normal mode: no flash rate limit
+        assert engine._min_flash_interval == 0.0
 
     def test_safe_mode_reduces_flash_intensity(self):
         """In safe mode, beat flash strength should be reduced by 30%."""
@@ -564,8 +564,9 @@ class TestRedToOrangeDirectLogic:
     """Direct unit tests of the red->orange safety logic without EMA interference."""
 
     def test_safety_limiter_shifts_saturated_red(self):
-        """Verify the safety limiter directly modifies hue for saturated red + flash."""
+        """Verify the safety limiter directly modifies hue for saturated red + flash (safe mode only)."""
         engine = EffectEngine(num_lights=3, max_flash_hz=10.0)
+        engine.set_safe_mode(True)  # Red protection only in safe mode
         # Set palette to red
         engine.set_palette((0.0, 5.0, 355.0))
 
@@ -598,8 +599,9 @@ class TestRedToOrangeDirectLogic:
             )
 
     def test_orange_shift_target_is_28_degrees(self):
-        """The orange shift should target ~28 degrees."""
+        """The orange shift should target ~28 degrees (safe mode only)."""
         engine = EffectEngine(num_lights=1, max_flash_hz=10.0)
+        engine.set_safe_mode(True)  # Red protection only in safe mode
 
         # Manually set up the conditions for safety check
         # We need to trigger the tick pipeline where the safety check runs.

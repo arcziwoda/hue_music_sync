@@ -1256,13 +1256,13 @@ body::after {
 
   <section class="controls-row">
     <div class="control">
-      <label data-hint="Beat flashes in pure white instead of the current palette color">FLASH</label>
-      <button class="btn-white-flash" id="btnWhiteFlash">WHITE FLASH</button>
+      <label data-hint="Auto strobe on drops and high energy. When enabled, strobes interleave with normal effects">STROBE</label>
+      <button class="btn-white-flash" id="btnStrobeToggle">AUTO STROBE</button>
     </div>
     <div class="control">
-      <label data-hint="Manual triggers. FLASH = one-shot burst, STROBE = rapid burst (respects safety limits)">TRIGGER</label>
+      <label data-hint="Manual triggers. FLASH = one-shot colored burst, BURST = white strobe sequence (~2.4s)">TRIGGER</label>
       <button class="btn-trigger" id="btnFlash">FLASH</button>
-      <button class="btn-trigger" id="btnStrobe">STROBE</button>
+      <button class="btn-trigger" id="btnStrobe">BURST</button>
     </div>
     <div class="control">
       <label data-hint="Save/load all current settings to 3 slots. Stored in browser localStorage">PRESETS</label>
@@ -1539,10 +1539,10 @@ function syncUIState(d) {
     if ($sm) $sm.classList.toggle('active', d.safe_mode);
   }
 
-  // White flash mode sync (Task 2.16)
-  if (typeof d.white_flash === 'boolean') {
-    var $wf = document.getElementById('btnWhiteFlash');
-    if ($wf) $wf.classList.toggle('active', d.white_flash);
+  // Strobe toggle sync
+  if (typeof d.strobe_enabled === 'boolean') {
+    var $st = document.getElementById('btnStrobeToggle');
+    if ($st) $st.classList.toggle('active', d.strobe_enabled);
   }
 
   // Calibration mode sync
@@ -2031,14 +2031,14 @@ function initControls() {
     send('set_calibration_delay', ms);
   });
 
-  // White flash toggle (Task 2.16)
-  var $whiteFlash = document.getElementById('btnWhiteFlash');
-  $whiteFlash.addEventListener('click', function() {
-    var isActive = $whiteFlash.classList.toggle('active');
-    send('set_white_flash', isActive);
+  // Auto strobe toggle
+  var $strobeToggle = document.getElementById('btnStrobeToggle');
+  $strobeToggle.addEventListener('click', function() {
+    var isActive = $strobeToggle.classList.toggle('active');
+    send('set_strobe_enabled', isActive);
   });
 
-  // Manual flash trigger (Task 2.17)
+  // Manual flash trigger (single colored flash)
   var $btnFlash = document.getElementById('btnFlash');
   $btnFlash.addEventListener('click', function() {
     send('trigger_flash', true);
@@ -2046,12 +2046,12 @@ function initControls() {
     setTimeout(function() { $btnFlash.classList.remove('firing'); }, 150);
   });
 
-  // Manual strobe trigger (Task 2.17)
+  // Manual strobe burst (white strobe with dark phases)
   var $btnStrobe = document.getElementById('btnStrobe');
   $btnStrobe.addEventListener('click', function() {
     send('trigger_strobe', true);
     $btnStrobe.classList.add('firing');
-    setTimeout(function() { $btnStrobe.classList.remove('firing'); }, 800);
+    setTimeout(function() { $btnStrobe.classList.remove('firing'); }, 2400);
   });
 
   // Preset save/load (Task 2.18) — uses localStorage
@@ -2108,7 +2108,7 @@ function _collectCurrentState() {
 
   // Toggles
   state.safe_mode = document.getElementById('btnSafeMode').classList.contains('active');
-  state.white_flash = document.getElementById('btnWhiteFlash').classList.contains('active');
+  state.strobe_enabled = document.getElementById('btnStrobeToggle').classList.contains('active');
 
   return state;
 }
@@ -2208,11 +2208,11 @@ function _restoreState(state) {
       send('set_safe_mode', state.safe_mode);
     }
   }
-  if (typeof state.white_flash === 'boolean') {
-    var $wf = document.getElementById('btnWhiteFlash');
-    if (state.white_flash !== $wf.classList.contains('active')) {
-      $wf.classList.toggle('active');
-      send('set_white_flash', state.white_flash);
+  if (typeof state.strobe_enabled === 'boolean') {
+    var $se = document.getElementById('btnStrobeToggle');
+    if (state.strobe_enabled !== $se.classList.contains('active')) {
+      $se.classList.toggle('active');
+      send('set_strobe_enabled', state.strobe_enabled);
     }
   }
 }

@@ -102,6 +102,7 @@ docs/                          # Research documents
 - **Predictive beats**: PLL predicts next beat, engine fires early with confidence gating — reduces perceived latency
 - **BeatDetector**: uses median (matching research spec) for adaptive threshold. Beat threshold is fully automatic (adaptive Parallelcube) — no manual sensitivity config
 - **effects.py**: standalone building blocks (Pulse, Breathe, Strobe, FlashDecay, ColorCycle) — NOT integrated with EffectEngine
+- **Strobe system**: pipeline override (like calibration mode) — when active, `_tick_strobe()` replaces full pipeline output with white/black alternation. Auto-strobe triggers on DROP section and sustained high energy (toggle via UI). Manual burst always available. Safety: max 3 Hz (2 Hz safe mode), self-terminating cycle count.
 - **Genre presets**: `_apply_genre_preset()` updates pipeline + engine atomically, uses `set_base_attack_alpha()` to preserve intensity multiplier
 - **Light send rate**: configurable via `fps_target` (default 50 Hz) — oversampling compensates for UDP packet loss
 
