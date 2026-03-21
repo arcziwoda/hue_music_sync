@@ -23,7 +23,8 @@ if %errorlevel% neq 0 (
 echo.
 
 :: ---- Install Python 3.12 ----
-echo Installing Python 3.12...
+:: python-mbedtls has no wheels for 3.13+, so we MUST use 3.12
+echo Installing Python 3.12 (required for python-mbedtls)...
 uv python install 3.12
 if %errorlevel% neq 0 (
     echo ERROR: Failed to install Python 3.12.
@@ -31,23 +32,32 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-:: ---- Pin Python 3.12 and recreate venv ----
-:: python-mbedtls has no wheels for 3.13+, so we MUST use 3.12
-echo Pinning Python 3.12 for this project...
-uv python pin 3.12
+:: ---- Force venv with Python 3.12 ----
+:: Remove existing venv to prevent uv from reusing a 3.13 one
 if exist .venv (
-    echo Removing existing venv to ensure Python 3.12...
+    echo Removing existing venv...
     rmdir /s /q .venv
 )
+echo Creating venv with Python 3.12...
+uv venv --python cpython-3.12
+if %errorlevel% neq 0 (
+    echo ERROR: Failed to create Python 3.12 venv.
+    pause
+    exit /b 1
+)
 
-:: ---- Install dependencies ----
-echo Installing dependencies with Python 3.12...
-uv sync
+:: ---- Install dependencies into 3.12 venv ----
+echo Installing dependencies...
+uv sync --python cpython-3.12
 if %errorlevel% neq 0 (
     echo ERROR: Failed to install dependencies.
     pause
     exit /b 1
 )
+echo.
+
+:: ---- Verify Python version ----
+uv run python --version
 echo.
 
 :: ---- Build with PyInstaller ----
@@ -60,7 +70,7 @@ if %errorlevel% neq 0 (
 )
 echo.
 
-:: ---- Clean up pin file (don't commit it) ----
+:: ---- Clean up ----
 if exist .python-version del .python-version
 
 echo === Build complete! ===
