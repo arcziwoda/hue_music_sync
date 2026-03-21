@@ -81,10 +81,12 @@ class TestCalibrationDelay:
         assert engine.calibration_delay_ms == 600.0
 
     def test_calibration_delay_clamps_min(self):
-        """Calibration delay is clamped to 0ms min."""
+        """Calibration delay is clamped to -200ms min."""
         engine = EffectEngine(num_lights=4)
         engine.set_calibration_delay(-100.0)
-        assert engine.calibration_delay_ms == 0.0
+        assert engine.calibration_delay_ms == -100.0
+        engine.set_calibration_delay(-300.0)
+        assert engine.calibration_delay_ms == -200.0
 
     def test_effective_compensation_includes_calibration(self):
         """Effective latency compensation = base + calibration delay."""

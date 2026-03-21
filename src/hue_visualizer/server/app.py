@@ -421,6 +421,8 @@ async def audio_loop():
                     data["saturation_boost"] = round(effect_engine.saturation_boost, 2)
                     # Task 2.16: White flash mode state
                     data["white_flash"] = effect_engine.white_flash_mode
+                    # Calibration mode state
+                    data["calibration_mode"] = effect_engine.calibration_mode
                     # Task 2.6: Calibration delay state
                     data["calibration_delay"] = round(effect_engine.calibration_delay_ms)
                     # Task 2.8: Brightness min/max state
@@ -429,9 +431,7 @@ async def audio_loop():
 
                 # Task B.10: Include control state so frontend can sync on (re)connect
                 if pipeline:
-                    data["sensitivity"] = round(pipeline.beat_detector.base_threshold, 1)
                     data["bass_boost"] = round(pipeline.analyzer.bass_boost, 1)
-                    data["cooldown_ms"] = round(pipeline.beat_detector.cooldown_sec * 1000)
                     # Audio device info for UI sync
                     dev = pipeline.capture.current_device_info
                     data["audio_device"] = dev["name"] if dev else None
@@ -868,21 +868,10 @@ def _handle_control(msg: dict):
 
     t = msg.get("type")
 
-    if t == "set_sensitivity":
-        v = float(msg["value"])
-        pipeline.beat_detector.set_threshold(v)
-        logger.info(f"Beat threshold -> {v}")
-
-    elif t == "set_bass_boost":
+    if t == "set_bass_boost":
         v = float(msg["value"])
         pipeline.analyzer.bass_boost = v
         logger.info(f"Bass boost -> {v}")
-
-    elif t == "set_cooldown":
-        v = float(msg["value"])
-        pipeline.beat_detector.cooldown_sec = v / 1000.0
-        pipeline.beat_detector.auto_cooldown = False  # Manual override
-        logger.info(f"Beat cooldown -> {v}ms (auto off)")
 
     elif t == "set_spatial_mode" and effect_engine:
         mode = msg.get("value", "frequency_zones")
@@ -915,11 +904,6 @@ def _handle_control(msg: dict):
         if level in INTENSITY_LEVELS and effect_engine:
             current_intensity = level
             effect_engine.set_intensity(level)
-            # Apply beat threshold multiplier to pipeline
-            if pipeline:
-                base_thresh = pipeline.beat_detector.base_threshold
-                mult = effect_engine.get_intensity_beat_threshold_multiplier()
-                pipeline.beat_detector.set_threshold(base_thresh * mult)
             logger.info(f"Intensity -> {level}")
 
     elif t == "set_effects_size" and effect_engine:
@@ -980,6 +964,10 @@ def _handle_control(msg: dict):
         # Task 2.17: Manual strobe burst (3 flashes)
         effect_engine.trigger_manual_strobe()
         logger.info("Manual strobe triggered")
+
+    elif t == "set_calibration_mode" and effect_engine:
+        enabled = bool(msg.get("value", False))
+        effect_engine.set_calibration_mode(enabled)
 
     elif t == "set_calibration_delay" and effect_engine:
         # Task 2.6: Manual calibration delay

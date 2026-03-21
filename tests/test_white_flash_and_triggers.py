@@ -373,19 +373,23 @@ class TestWhiteFlashWithManualTrigger:
             engine.tick(_loud_features(), _no_beat(), dt=0.033, now=now)
             now += 0.033
 
-        # Record saturation before manual flash
+        # Let engine settle before manual flash
         now += 2.0
         engine.tick(_loud_features(), _no_beat(), dt=0.033, now=now)
-        sat_before = engine._lights[0].saturation
 
         # Trigger manual flash
         engine.trigger_manual_flash()
         now += 0.033
-        engine.tick(_loud_features(), _no_beat(), dt=0.033, now=now)
+        states = engine.tick(_loud_features(), _no_beat(), dt=0.033, now=now)
 
-        # After flash with white mode, saturation should be reduced
-        sat_after = engine._lights[0].saturation
-        assert sat_after < sat_before, (
-            f"White flash should reduce saturation on manual flash: "
-            f"before={sat_before:.3f}, after={sat_after:.3f}"
+        # After flash with white mode, output should be desaturated (white).
+        # White flash overrides output after EMA smoothing, so we check
+        # the LightState output: x≈0.3127, y≈0.3290 is D65 white.
+        # With sat=0 the xy should be close to white point.
+        state = states[0]
+        assert abs(state.x - 0.3127) < 0.05, (
+            f"White flash should output near-white chromaticity: x={state.x:.4f}"
+        )
+        assert state.brightness > 0.5, (
+            f"White flash should have high brightness: {state.brightness:.3f}"
         )

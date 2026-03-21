@@ -81,7 +81,7 @@ class Settings(BaseSettings):
     # Beat Detection Configuration
     beat_threshold_multiplier: float = Field(
         default=1.4,
-        description="Energy threshold multiplier for beat detection (1.3-1.5 typical)",
+        description="Legacy beat threshold multiplier — unused, adaptive Parallelcube threshold is used instead",
         ge=1.0,
         le=3.0,
     )
@@ -177,11 +177,11 @@ class Settings(BaseSettings):
     # Calibration delay (Task 2.6)
     calibration_delay_ms: float = Field(
         default=0.0,
-        description="Manual calibration delay in milliseconds (0-600). "
-        "Adds to the predictive beat latency compensation to compensate for "
-        "system-specific audio-to-light delay. Community consensus for Hue systems "
-        "is +300 to +600ms additional delay.",
-        ge=0.0,
+        description="Manual calibration delay in milliseconds (-200 to 600). "
+        "Positive = lights fire earlier (compensate for late lights). "
+        "Negative = lights fire later (compensate for early lights, e.g. loopback without bridge). "
+        "Adds to the predictive beat latency compensation.",
+        ge=-200.0,
         le=600.0,
     )
 

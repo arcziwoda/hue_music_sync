@@ -473,6 +473,38 @@ body::after {
   background: rgba(255, 170, 0, 0.12);
 }
 
+/* Calibration mode toggle */
+.btn-calibrate {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  padding: 4px 10px;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.btn-calibrate:hover {
+  border-color: var(--text-mid);
+  color: var(--text-mid);
+}
+
+.btn-calibrate.active {
+  border-color: #00ff88;
+  color: #00ff88;
+  background: rgba(0, 255, 136, 0.12);
+  animation: calibrate-pulse 1s ease-in-out infinite;
+}
+
+@keyframes calibrate-pulse {
+  0%, 100% { border-color: #00ff88; }
+  50% { border-color: #00ff8844; }
+}
+
 /* White flash toggle (Task 2.16) */
 .btn-white-flash {
   font-family: 'IBM Plex Mono', monospace;
@@ -1104,19 +1136,9 @@ body::after {
 
   <section class="controls-row">
     <div class="control">
-      <label data-hint="Beat detection threshold. Lower = more beats detected, higher = only strong beats">SENSITIVITY</label>
-      <input type="range" id="ctrlSensitivity" min="10" max="30" value="14" step="1">
-      <span class="control-val" id="valSensitivity">1.4</span>
-    </div>
-    <div class="control">
       <label data-hint="Low frequency amplification. Compensates for how we hear bass quieter">BASS BOOST</label>
       <input type="range" id="ctrlBassBoost" min="10" max="50" value="20" step="1">
       <span class="control-val" id="valBassBoost">2.0</span>
-    </div>
-    <div class="control">
-      <label data-hint="Minimum ms between beats. Prevents double-triggers on complex rhythms">COOLDOWN</label>
-      <input type="range" id="ctrlCooldown" min="50" max="1000" value="300" step="10">
-      <span class="control-val" id="valCooldown">300</span>
     </div>
   </section>
 
@@ -1222,8 +1244,12 @@ body::after {
 
   <section class="controls-row">
     <div class="control">
-      <label data-hint="Timing offset to sync lights with audio. Increase if lights feel late">CALIB DELAY</label>
-      <input type="range" id="ctrlCalibDelay" min="0" max="600" value="0" step="10">
+      <label data-hint="Enter calibration mode: all lights flash white on beat. Adjust delay until flashes sync with the kick drum">CALIBRATE</label>
+      <button class="btn-calibrate" id="btnCalibrate">CALIBRATE</button>
+    </div>
+    <div class="control">
+      <label data-hint="Timing offset to sync lights with audio. Increase if lights feel late, decrease if early">DELAY</label>
+      <input type="range" id="ctrlCalibDelay" min="-200" max="600" value="0" step="10">
       <span class="control-val" id="valCalibDelay">0ms</span>
     </div>
   </section>
@@ -1519,6 +1545,12 @@ function syncUIState(d) {
     if ($wf) $wf.classList.toggle('active', d.white_flash);
   }
 
+  // Calibration mode sync
+  if (typeof d.calibration_mode === 'boolean') {
+    var $cal = document.getElementById('btnCalibrate');
+    if ($cal) $cal.classList.toggle('active', d.calibration_mode);
+  }
+
   // Audio device sync
   if (typeof d.audio_device_index !== 'undefined') {
     var $devSel = document.getElementById('audioDeviceSelect');
@@ -1531,23 +1563,11 @@ function syncUIState(d) {
   // Sync sliders only once per connection to avoid overriding user dragging
   if (!_uiSynced) {
     _uiSynced = true;
-    if (typeof d.sensitivity === 'number') {
-      var $sens = document.getElementById('ctrlSensitivity');
-      var $sensV = document.getElementById('valSensitivity');
-      $sens.value = Math.round(d.sensitivity * 10);
-      $sensV.textContent = d.sensitivity.toFixed(1);
-    }
     if (typeof d.bass_boost === 'number') {
       var $bass = document.getElementById('ctrlBassBoost');
       var $bassV = document.getElementById('valBassBoost');
       $bass.value = Math.round(d.bass_boost * 10);
       $bassV.textContent = d.bass_boost.toFixed(1);
-    }
-    if (typeof d.cooldown_ms === 'number') {
-      var $cd = document.getElementById('ctrlCooldown');
-      var $cdV = document.getElementById('valCooldown');
-      $cd.value = d.cooldown_ms;
-      $cdV.textContent = Math.round(d.cooldown_ms).toString();
     }
     if (typeof d.saturation_boost === 'number') {
       var $sat = document.getElementById('ctrlSaturation');
@@ -1854,28 +1874,13 @@ function initControls() {
     loadAudioDevices();
   });
 
-  var $sens = document.getElementById('ctrlSensitivity');
   var $bass = document.getElementById('ctrlBassBoost');
-  var $cd = document.getElementById('ctrlCooldown');
-  var $sensV = document.getElementById('valSensitivity');
   var $bassV = document.getElementById('valBassBoost');
-  var $cdV = document.getElementById('valCooldown');
-
-  $sens.addEventListener('input', function() {
-    var v = ($sens.value / 10).toFixed(1);
-    $sensV.textContent = v;
-    send('set_sensitivity', parseFloat(v));
-  });
 
   $bass.addEventListener('input', function() {
     var v = ($bass.value / 10).toFixed(1);
     $bassV.textContent = v;
     send('set_bass_boost', parseFloat(v));
-  });
-
-  $cd.addEventListener('input', function() {
-    $cdV.textContent = $cd.value;
-    send('set_cooldown', parseInt($cd.value));
   });
 
   // Spatial mode buttons
@@ -2008,7 +2013,14 @@ function initControls() {
     }
   });
 
-  // Calibration delay slider (Task 2.6)
+  // Calibration mode toggle
+  var $btnCalib = document.getElementById('btnCalibrate');
+  $btnCalib.addEventListener('click', function() {
+    var isActive = $btnCalib.classList.toggle('active');
+    send('set_calibration_mode', isActive);
+  });
+
+  // Calibration delay slider
   var $calib = document.getElementById('ctrlCalibDelay');
   var $calibV = document.getElementById('valCalibDelay');
   $calib.addEventListener('input', function() {
@@ -2086,9 +2098,7 @@ function _collectCurrentState() {
   state.effects_size = activeFx ? activeFx.dataset.fxsize : 'ALL';
 
   // Sliders
-  state.sensitivity = document.getElementById('ctrlSensitivity').value;
   state.bass_boost = document.getElementById('ctrlBassBoost').value;
-  state.cooldown = document.getElementById('ctrlCooldown').value;
   state.saturation = document.getElementById('ctrlSaturation').value;
   state.brightness_min = document.getElementById('ctrlBrightMin').value;
   state.brightness_max = document.getElementById('ctrlBrightMax').value;
@@ -2144,14 +2154,6 @@ function _restoreState(state) {
   }
 
   // Sliders
-  if (state.sensitivity) {
-    var $sens = document.getElementById('ctrlSensitivity');
-    var $sensV = document.getElementById('valSensitivity');
-    $sens.value = state.sensitivity;
-    var v = ($sens.value / 10).toFixed(1);
-    $sensV.textContent = v;
-    send('set_sensitivity', parseFloat(v));
-  }
   if (state.bass_boost) {
     var $bass = document.getElementById('ctrlBassBoost');
     var $bassV = document.getElementById('valBassBoost');
@@ -2159,13 +2161,6 @@ function _restoreState(state) {
     var v = ($bass.value / 10).toFixed(1);
     $bassV.textContent = v;
     send('set_bass_boost', parseFloat(v));
-  }
-  if (state.cooldown) {
-    var $cd = document.getElementById('ctrlCooldown');
-    var $cdV = document.getElementById('valCooldown');
-    $cd.value = state.cooldown;
-    $cdV.textContent = state.cooldown;
-    send('set_cooldown', parseInt(state.cooldown));
   }
   if (state.saturation) {
     var $sat = document.getElementById('ctrlSaturation');

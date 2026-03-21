@@ -11,10 +11,22 @@ from hue_visualizer.core.config import Settings
 def main():
     load_dotenv()
 
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
-    )
+    # Configure logging: route our app logs through a named logger,
+    # set root logger to WARNING to suppress hue_entertainment_pykit's
+    # noisy root-level logging (logs every set_input call at INFO, ~300/s).
+    root = logging.getLogger()
+    root.setLevel(logging.WARNING)
+
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter(
+        "%(asctime)s [%(name)s] %(levelname)s: %(message)s"
+    ))
+
+    # Our app loggers at INFO
+    for name in ("hue_visualizer", "uvicorn"):
+        lg = logging.getLogger(name)
+        lg.setLevel(logging.INFO)
+        lg.addHandler(handler)
 
     settings = Settings()
 

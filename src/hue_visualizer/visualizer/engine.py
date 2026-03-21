@@ -536,6 +536,14 @@ class EffectEngine:
         # Pending manual flash count: decremented each time a flash is fired.
         self._manual_flash_pending: int = 0
 
+        # --- Calibration mode ---
+        # When active, tick() bypasses the full pipeline and outputs a simple
+        # white flash on beat / black between beats. Ultra-short decay for
+        # sharp timing so the user can visually judge sync and adjust delay.
+        self._calibration_mode: bool = False
+        self._calibration_flash_tau: float = 0.05  # 50ms decay — very sharp
+        self._calibration_flash_brightness: float = 0.0
+
         # --- Section detection state (Task 1.3) ---
         self._current_section = Section.NORMAL
         self._section_intensity: float = 0.0
@@ -568,6 +576,10 @@ class EffectEngine:
         """
         if now is None:
             now = time.monotonic()
+
+        # --- Calibration mode: bypass full pipeline ---
+        if self._calibration_mode:
+            return self._tick_calibration(features, beat_info, dt, now)
 
         # --- Predictive beat triggering (Task 0.4) ---
         trigger_beat, beat_strength = self._resolve_beat_trigger(
@@ -813,12 +825,6 @@ class EffectEngine:
                 + light.sparkle_brightness * 0.5 * reactive_scale
             )
 
-            # Task 2.16: White flash mode — when active, drive saturation
-            # toward 0 proportionally to flash brightness for maximum lumen output.
-            if self._white_flash_mode and light.flash_brightness > 0.02:
-                white_weight = min(1.0, light.flash_brightness * reactive_scale)
-                final_s = final_s * (1.0 - white_weight)
-
             # Task 1.12: Apply intensity max brightness cap
             combined_b = min(combined_b, self._max_brightness)
 
@@ -897,6 +903,13 @@ class EffectEngine:
                 self._brightness_min
                 + (self._brightness_max - self._brightness_min) * out_b
             )
+
+            # Task 2.16: White flash mode — override AFTER smoothing.
+            # When flash is active, hard-set to white (bypass EMA on saturation)
+            # so the flash is immediately white, not smoothed from a color.
+            if self._white_flash_mode and light.flash_brightness > 0.05:
+                out_s = 0.0
+                final_b = max(final_b, light.flash_brightness * reactive_scale)
 
             x, y = hsv_to_xy(out_h, out_s, 1.0)
             light_states.append(
@@ -1006,6 +1019,65 @@ class EffectEngine:
             result.append((h, s, b))
 
         return result
+
+    # --- Calibration mode ---
+
+    def _tick_calibration(
+        self,
+        features: AudioFeatures,
+        beat_info: BeatInfo,
+        dt: float,
+        now: float,
+    ) -> list[LightState]:
+        """Simplified tick for calibration: white flash on beat, black otherwise.
+
+        Uses the same predictive beat triggering as normal mode so the user
+        is calibrating the actual timing they'll experience in production.
+        Flash decay is ultra-short (~50ms) for sharp visual timing reference.
+        """
+        # Use the same predictive/reactive logic as normal mode
+        trigger_beat, beat_strength = self._resolve_beat_trigger(beat_info, now)
+
+        # Trigger flash on beat
+        if trigger_beat:
+            self._calibration_flash_brightness = max(0.8, beat_strength)
+
+        # Exponential decay
+        if self._calibration_flash_brightness > 0.01:
+            self._calibration_flash_brightness *= math.exp(
+                -dt / self._calibration_flash_tau
+            )
+            if self._calibration_flash_brightness < 0.01:
+                self._calibration_flash_brightness = 0.0
+
+        # All lights: white (sat=0) at flash brightness, or off
+        b = self._calibration_flash_brightness
+        # Apply brightness min/max mapping
+        final_b = self._brightness_min + (
+            self._brightness_max - self._brightness_min
+        ) * b
+
+        x, y = hsv_to_xy(0.0, 0.0, 1.0)  # White chromaticity
+        return [
+            LightState(x=x, y=y, brightness=final_b, light_id=i)
+            for i in range(self.num_lights)
+        ]
+
+    @property
+    def calibration_mode(self) -> bool:
+        """Whether calibration mode is active."""
+        return self._calibration_mode
+
+    def set_calibration_mode(self, enabled: bool) -> None:
+        """Toggle calibration mode.
+
+        When enabled, tick() outputs simple white flashes on beat for
+        visual timing calibration. Use with the calibration delay slider.
+        """
+        self._calibration_mode = enabled
+        if enabled:
+            self._calibration_flash_brightness = 0.0
+        logger.info(f"Calibration mode -> {'ON' if enabled else 'OFF'}")
 
     def _resolve_beat_trigger(
         self, beat_info: BeatInfo, now: float
@@ -1427,16 +1499,17 @@ class EffectEngine:
         return self._calibration_delay_sec * 1000.0
 
     def set_calibration_delay(self, ms: float) -> None:
-        """Set manual calibration delay in milliseconds (0-600).
+        """Set manual calibration delay in milliseconds (-200 to 600).
 
         This adds to the base latency compensation for predictive beat triggering.
         Total effective compensation = latency_compensation + calibration_delay.
-        More delay = earlier trigger = more lead time for light commands.
+        Positive = earlier trigger (lights feel late, need more lead time).
+        Negative = later trigger (lights feel early, reduce lead time).
 
         Args:
-            ms: Delay in milliseconds, clamped to 0-600.
+            ms: Delay in milliseconds, clamped to -200..600.
         """
-        self._calibration_delay_sec = max(0.0, min(600.0, ms)) / 1000.0
+        self._calibration_delay_sec = max(-200.0, min(600.0, ms)) / 1000.0
 
     @property
     def effective_latency_compensation_ms(self) -> float:
