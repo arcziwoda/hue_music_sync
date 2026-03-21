@@ -3,7 +3,10 @@
     "allow": [
       "Bash(uv:*)",
       "mcp__context7__resolve-library-id",
-      "Bash(python3:*)"
+      "Bash(python3:*)",
+      "Bash(ls:*)",
+      "Bash(git -C /Users/arturkempinski/coding/python/hue log --oneline -5)",
+      "WebFetch(domain:pypi.org)"
     ]
   }
 }

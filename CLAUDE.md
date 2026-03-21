@@ -19,16 +19,16 @@ Real-time music visualization for Philips Hue lights. Analyzes audio via FFT and
                   (live viz UI)              ↓
                                 ColorMapper + SpatialMapper + beat flash + EMA smoothing
                                              ↓
-                                EntertainmentController → DTLS → Bridge → Lights (~25 Hz)
+                                EntertainmentController → DTLS → Bridge → Lights (~50 Hz)
 ```
 
 All audio processing and light control in Python backend. Web UI is a control panel + real-time visualization.
 
 ## Current Status
 
-**Sesja 1-5 complete.** Full pipeline: audio → FFT → beat detection (autocorrelation BPM + PLL) → effect engine → Hue Entertainment API + WebSocket → browser visualization. UI controls, light preview, auto-gain, genre presets, stable BPM tracking.
+Full pipeline operational: audio → FFT → beat detection → hybrid effect engine → Hue Entertainment API + WebSocket → browser visualization. P0/P1/P2 backlog complete — STFT overlap, predictive beats, hybrid reactive-generative engine, section detection, per-band onsets, spatial effects, palettes, UI controls, safety improvements.
 
-**Code review complete (2026-03-20).** Full audit against research docs — see `BACKLOG.md` for prioritized feature/bug backlog with references to research specs.
+See `BACKLOG.md` for remaining items and research spec references.
 
 ## Development
 
@@ -64,7 +64,8 @@ src/hue_visualizer/
 ├── __main__.py                # Entry point (uvicorn + dotenv)
 ├── core/
 │   ├── config.py              # Pydantic Settings (all params from .env)
-│   └── exceptions.py          # Custom exception hierarchy
+│   ├── exceptions.py          # Custom exception hierarchy
+│   └── persistence.py         # State persistence (bridge config, presets)
 ├── bridge/
 │   ├── connection.py          # HueBridge REST API wrapper
 │   ├── discovery.py           # Bridge discovery & pairing
@@ -72,8 +73,9 @@ src/hue_visualizer/
 │   └── effects.py             # Tick-based effects (PulseEffect, BreatheEffect, StrobeEffect, FlashDecayEffect, ColorCycleEffect)
 ├── audio/
 │   ├── capture.py             # PyAudio wrapper, threaded capture, ring buffer
-│   ├── analyzer.py            # FFT (2048 Hann), 7-band energies, spectral features
-│   └── beat_detector.py       # Adaptive beat detection, BPM estimation, PLL
+│   ├── analyzer.py            # FFT (2048 Hann, 50% overlap), 7-band energies, Mel filterbank, spectral features
+│   ├── beat_detector.py       # Adaptive beat detection, per-band onsets, BPM estimation, PLL
+│   └── section_detector.py    # Section detection (drop/buildup/breakdown awareness)
 ├── visualizer/
 │   ├── color_mapper.py        # Audio features → HSV (centroid→hue, RMS→brightness, flatness→saturation)
 │   ├── spatial.py             # Per-light distribution (uniform, frequency_zones, wave, mirror)
@@ -91,48 +93,21 @@ scripts/                       # Setup & test scripts
 docs/                          # Research documents
 ```
 
-## Key Modules
+## Non-Obvious Design Decisions
 
-### server/app.py
-- `AudioPipeline` — wraps AudioCapture + AudioAnalyzer + BeatDetector, processes all buffered frames per tick (no frame loss for beat detection), latches pending beats
-- `ConnectionManager` — WebSocket broadcast to multiple clients
-- `audio_loop()` — async background task, ~30 Hz WS broadcast + ~25 Hz light updates via EffectEngine
-- Lifespan-managed: auto-starts audio + EffectEngine (always) + optional EntertainmentController, cleans up on shutdown
-- Uses Pydantic Settings for all configuration (no more raw os.getenv)
-- EffectEngine always active — drives light preview on WebSocket even without bridge
-- Bridge connection optional: audio-only mode works without .env bridge vars
-- Light preview: sends per-light RGB to browser via `light_preview` field in WS payload
-- Control messages from frontend: `set_sensitivity`, `set_bass_boost`, `set_cooldown`, `set_spatial_mode`, `set_genre`, `set_intensity`, `set_effects_size_preset`, `set_color_mode`, `set_palette`
-- Genre presets: `_apply_genre_preset()` updates pipeline + engine parameters atomically, uses `set_base_attack_alpha()` to preserve intensity multiplier
-
-### visualizer/ module
-- `ColorMapper` — palette-driven hue with spectral centroid as ±20° offset modulator (not primary driver — deliberate deviation from research spec), RMS → brightness (gamma 2.2), flatness → saturation (inverse). All outputs EMA-smoothed
-- `SpatialMapper` — 5 modes: uniform, frequency_zones, wave, mirror, chase. NOTE: `distribute()` is dead code — engine reimplements spatial logic internally. Light positions default to linear 0-1 but can be set from bridge entertainment area channel data via `set_positions()` (Task 1.15)
-- `EffectEngine` — hybrid reactive-generative orchestrator: ColorMapper → SpatialMapper → beat flash overlay (exponential decay) → per-light asymmetric EMA → safety limiter (max 3Hz flash, no strobe red) → LightState[]. Chase mode: sequential per-bulb activation with beat-synced travel and exponential decay tail. `set_light_positions()` passes bridge positions to spatial mapper + generative layer. Intensity selector (Task 1.12): 3 levels (intense/normal/chill) with multipliers on flash_tau, attack_alpha, max_brightness, beat_threshold — stacks on genre base values. Effects size (Task 1.13): controls how many lights get reactive effects per beat, rotating subset. Light group splitting (Task 1.14): auto-assigns lights to 2-3 groups with palette phase offsets for color diversity
-- `effects.py` building blocks (PulseEffect, BreatheEffect, StrobeEffect, FlashDecayEffect, ColorCycleEffect) exist but are NOT integrated with EffectEngine — standalone only
-
-### frontend/index.html
-- Dark industrial techno aesthetic (Bebas Neue + IBM Plex Mono, noise grain, scanlines, 1px borders)
-- Canvas: spectrum curve (64-bin, bezier smoothed, cyan glow) + 7-band frequency bars
-- Browser-side EMA smoothing (attack=0.45, release=0.07) for smooth animation at 60fps
-- Beat flash overlay, BPM with confidence opacity, level/beat/centroid meters
-- Light preview: colored circles with glow showing per-light RGB state (PREVIEW/STREAMING indicator)
-- Controls: sensitivity slider, bass boost slider, cooldown slider
-- Spatial mode buttons: UNI / FREQ / WAVE / MIRROR / CHASE
-- Genre preset buttons: TECHNO / HOUSE / DNB / AMBIENT
-- Intensity buttons: INTENSE / NORMAL / CHILL (Task 1.12)
-- Effects size buttons: 1L / 25% / 50% / ALL (Task 1.13)
-- WebSocket auto-reconnect with exponential backoff
-- Retina DPI canvas scaling
-
-### audio/ pipeline
-- `AudioCapture` — threaded PyAudio, ring buffer (deque), `get_all_frames()` for batch processing
-- `AudioAnalyzer` — Hann FFT 2048, 7-band energies (auto-gain normalized), bass boost (Fletcher-Munson), spectral centroid/flux/rolloff/flatness. NOTE: no STFT overlap — each 1024-sample buffer is zero-padded to 2048 instead of concatenated with previous frame
-- `BeatDetector` — variance-adaptive threshold (uses mean, not median as research recommends), onset function buffer (~4s), BPM via autocorrelation of onset function, PLL with proportional phase+period correction (computes `predicted_next_beat` but engine doesn't use it), octave error protection (configurable BPM range per genre), confidence gating, asymmetric EMA output smoothing. Spectral flux stored in `_flux_history` but never used (dead code)
+- **Bridge optional**: EffectEngine always active — drives light preview on WebSocket even without bridge connection. Audio-only mode works without .env bridge vars
+- **ColorMapper hue**: palette-driven with spectral centroid as ±20° offset modulator (deliberate deviation from research spec which uses centroid as primary hue driver)
+- **SpatialMapper**: distribution logic lives in `EffectEngine._distribute()`, not in SpatialMapper itself
+- **Hybrid engine**: GenerativeLayer always active (slow hue rotation + breathing), blended with reactive layer — quiet passages ~80% generative, loud ~80% reactive
+- **Predictive beats**: PLL predicts next beat, engine fires early with confidence gating — reduces perceived latency
+- **BeatDetector**: uses mean (not median as research recommends) for adaptive threshold. `_flux_history` populated but never read (dead code)
+- **effects.py**: standalone building blocks (Pulse, Breathe, Strobe, FlashDecay, ColorCycle) — NOT integrated with EffectEngine
+- **Genre presets**: `_apply_genre_preset()` updates pipeline + engine atomically, uses `set_base_attack_alpha()` to preserve intensity multiplier
+- **Light send rate**: configurable via `fps_target` (default 50 Hz) — oversampling compensates for UDP packet loss
 
 ## Configuration (.env)
 
-**Required for light control (sesja 3+):**
+**Required for light control:**
 - `BRIDGE_IP` — Hue Bridge IP
 - `HUE_USERNAME` — API username (from `scripts/get_clientkey.py`)
 - `HUE_CLIENTKEY` — Entertainment API client key
@@ -147,7 +122,7 @@ docs/                          # Research documents
 
 ## Key Technical Constraints
 
-- **Hue Entertainment API**: 25 Hz streaming rate, ~12.5 FPS effective at bulbs
+- **Hue Entertainment API**: ~50 Hz send rate (configurable `fps_target`), ~12.5 FPS effective at bulbs
 - **End-to-end latency**: 80-120ms typical (audio → light)
 - **Safety**: Max 3 Hz flash rate, never strobe saturated red
 - **Smoothing**: Asymmetric EMA — fast attack (α=0.5-0.8), slow release (α=0.05-0.15)
@@ -155,31 +130,23 @@ docs/                          # Research documents
 - **Brightness**: Gamma-corrected (γ=2.2) for perceptual linearity (Weber-Fechner)
 - **Bass**: Boosted 2× to compensate Fletcher-Munson hearing curve
 
-## Known Gaps (from code review)
+## Testing
 
-Key deviations from research specs — details and fixes in `BACKLOG.md`:
-- **No STFT overlap** — zero-padding instead of 50% overlap, ~3dB SNR loss (BACKLOG 0.1)
-- **25 Hz light send rate** — should be 50-60 Hz for UDP loss compensation (BACKLOG 0.2)
-- **No predictive triggering** — PLL computes predicted beats but engine ignores them (BACKLOG 0.4)
-- **No hybrid reactive-generative** — purely reactive, boring during quiet passages (BACKLOG 1.1)
-- **No multi-layer effects** — monolithic engine, effects.py building blocks unused (BACKLOG 1.2)
-- **No section detection** — no drop/buildup/breakdown awareness (BACKLOG 1.3)
-- **No per-band onsets** — only bass energy, no kick/snare/hi-hat separation (BACKLOG 1.5)
+```bash
+uv run pytest                              # All tests
+uv run pytest tests/test_beat_detector.py  # Single module
+uv run pytest -k "test_name"              # Single test by name
+```
 
 ## Research
 
-Detailed technical research in `docs/`:
-- `docs/cemplex_audio_lightning_research.md` — Comprehensive DSP, Hue protocol, perceptual science, architecture
-- `docs/ilightshow_research.md` — iLightShow teardown: pre-computed beats, palette system, effects, calibration
+- `docs/cemplex_audio_lightning_research.md` — DSP, Hue protocol, perceptual science, architecture
+- `docs/ilightshow_research.md` — iLightShow teardown: pre-computed beats, palette system, effects
 
 ## Backlog
 
-See `BACKLOG.md` for the prioritized feature/bug backlog (P0/P1/P2) with references to research document specs.
+See `BACKLOG.md` for remaining items with references to research specs.
 
 ## Documentation
 
-Always use context7 MCP tools when code generation or library/API docs are needed. Resolve library ID and fetch docs automatically.
-
-## Implementation Plan
-
-See `PLAN.md` for the phased implementation plan with task breakdown.
+Always use context7 MCP tools when code generation or library/API docs are needed.

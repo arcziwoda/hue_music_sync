@@ -48,9 +48,10 @@ class Settings(BaseSettings):
     )
 
     # Audio Configuration
-    audio_source: str = Field(
-        default="microphone",
-        description="Audio input source: 'microphone' or 'system'",
+    audio_device_index: int | None = Field(
+        default=None,
+        description="PyAudio input device index (None = system default). "
+        "Use GET /api/audio/devices to list available devices.",
     )
     buffer_size: int = Field(
         default=1024,

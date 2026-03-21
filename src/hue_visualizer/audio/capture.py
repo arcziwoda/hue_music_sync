@@ -126,6 +126,62 @@ class AudioCapture:
     def is_running(self) -> bool:
         return self._running
 
+    @property
+    def current_device_info(self) -> Optional[dict]:
+        """Return info dict for the currently active device, or None if not running."""
+        if not self._pa:
+            return None
+        try:
+            info = self._get_device_info()
+            return {
+                "index": info.get("index", self.device_index),
+                "name": info["name"],
+                "channels": info["maxInputChannels"],
+                "sample_rate": int(info["defaultSampleRate"]),
+            }
+        except Exception:
+            return None
+
+    def switch_device(self, device_index: Optional[int]) -> dict:
+        """Switch to a different audio input device at runtime.
+
+        Stops the current stream, updates device_index, restarts.
+        On failure, rolls back to the previous device.
+
+        Returns:
+            Device info dict for the new device.
+
+        Raises:
+            AudioCaptureError: If the new device can't be opened.
+        """
+        old_device_index = self.device_index
+        was_running = self._running
+
+        if was_running:
+            self.stop()
+
+        with self._lock:
+            self._frames.clear()
+
+        self.device_index = device_index
+
+        if was_running:
+            try:
+                self.start()
+            except AudioCaptureError:
+                logger.warning(
+                    f"Failed to open device {device_index}, "
+                    f"rolling back to {old_device_index}"
+                )
+                self.device_index = old_device_index
+                try:
+                    self.start()
+                except AudioCaptureError:
+                    pass
+                raise
+
+        return self.current_device_info or {"index": device_index, "name": "unknown"}
+
     def list_devices(self) -> list[dict]:
         """List available audio input devices."""
         pa = self._pa or pyaudio.PyAudio()

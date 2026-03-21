@@ -76,6 +76,8 @@ body::after {
   padding: 20px 28px 16px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+  position: relative;
+  z-index: 10;
 }
 
 .title-main {
@@ -97,7 +99,20 @@ body::after {
 .header-right {
   display: flex;
   align-items: flex-end;
-  gap: 32px;
+  gap: 24px;
+}
+
+.header-input-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.header-input-label {
+  font-size: 9px;
+  letter-spacing: 0.15em;
+  color: var(--text-dim);
+  white-space: nowrap;
 }
 
 .status {
@@ -368,6 +383,38 @@ body::after {
   flex-shrink: 0;
 }
 
+/* Audio device selector */
+.device-select {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 9px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text-mid);
+  padding: 3px 6px;
+  width: 180px;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+  text-overflow: ellipsis;
+}
+.device-select:focus { outline: none; border-color: var(--accent); }
+.device-select option { background: var(--bg); color: var(--text-mid); }
+.device-refresh {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 6px;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+  line-height: 1;
+}
+.device-refresh:hover { border-color: var(--accent); color: var(--accent);
+}
+
 /* Button group (for spatial mode / genre preset) */
 .btn-group {
   display: flex;
@@ -550,11 +597,443 @@ body::after {
 .corner-mark.tr { top: 6px; right: 6px; border-width: 1px 1px 0 0; }
 .corner-mark.bl { bottom: 6px; left: 6px; border-width: 0 0 1px 1px; }
 .corner-mark.br { bottom: 6px; right: 6px; border-width: 0 1px 1px 0; }
+
+/* Bridge setup wizard */
+.bridge-btn {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0.15em;
+  padding: 4px 12px;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.bridge-btn:hover {
+  border-color: var(--text-mid);
+  color: var(--text-mid);
+}
+
+.bridge-btn.connected {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Modal overlay */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.85);
+  z-index: 5000;
+  display: none;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal-overlay.visible {
+  display: flex;
+}
+
+.modal {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  width: 460px;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.modal-title {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 24px;
+  letter-spacing: 0.15em;
+  color: var(--text);
+}
+
+.modal-close {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 16px;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.modal-close:hover {
+  color: var(--text);
+}
+
+.modal-body {
+  padding: 16px 20px 20px;
+}
+
+.wiz-step {
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.wiz-step:last-child {
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.wiz-step-num {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 14px;
+  letter-spacing: 0.2em;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+
+.wiz-step-label {
+  font-size: 10px;
+  letter-spacing: 0.15em;
+  color: var(--text-mid);
+  margin-bottom: 10px;
+}
+
+.wiz-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.wiz-row:last-child {
+  margin-bottom: 0;
+}
+
+.wiz-btn {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  padding: 6px 16px;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.wiz-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.wiz-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.wiz-btn.success {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.wiz-btn.danger {
+  border-color: #ff4444;
+  color: #ff4444;
+}
+
+.wiz-btn.danger:hover:not(:disabled) {
+  border-color: #ff6666;
+  color: #ff6666;
+  background: rgba(255, 68, 68, 0.12);
+}
+
+.wiz-value {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-mid);
+}
+
+.wiz-value.success {
+  color: var(--accent);
+}
+
+.wiz-value.error {
+  color: #ff4444;
+}
+
+.wiz-msg {
+  font-size: 10px;
+  color: var(--text-dim);
+  line-height: 1.5;
+  margin-top: 6px;
+}
+
+.wiz-msg.waiting {
+  color: #ffaa00;
+}
+
+.wiz-msg.error {
+  color: #ff4444;
+}
+
+.wiz-msg.success {
+  color: var(--accent);
+}
+
+.wiz-select {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text-mid);
+  padding: 5px 8px;
+  min-width: 180px;
+  cursor: pointer;
+}
+
+.wiz-select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.wiz-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  margin-bottom: 16px;
+}
+
+.wiz-status-dot {
+  width: 8px;
+  height: 8px;
+  background: var(--text-dim);
+  flex-shrink: 0;
+}
+
+.wiz-status.connected .wiz-status-dot {
+  background: var(--accent);
+}
+
+.wiz-status-text {
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: var(--text-dim);
+}
+
+.wiz-status.connected .wiz-status-text {
+  color: var(--text-mid);
+}
+
+.wiz-status.saved .wiz-status-dot {
+  background: #d4a017;
+}
+
+.wiz-status.saved .wiz-status-text {
+  color: #d4a017;
+}
+
+/* Spinner animation for waiting states */
+@keyframes wiz-spin {
+  to { transform: rotate(360deg); }
+}
+
+.wiz-spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 1px solid var(--text-dim);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: wiz-spin 0.8s linear infinite;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
+/* ─── Hint tooltip system ─── */
+[data-hint] {
+  cursor: help;
+  position: relative;
+}
+
+[data-hint]::after {
+  content: '?';
+  display: inline-block;
+  font-size: 7px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.12);
+  margin-left: 4px;
+  vertical-align: middle;
+  transition: color 0.2s;
+}
+
+[data-hint]:hover::after {
+  color: var(--accent);
+}
+
+.hint-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 0;
+  background: var(--bg);
+  border-top: 1px solid transparent;
+  z-index: 9000;
+  overflow: hidden;
+  transition: height 0.15s ease-out, border-color 0.15s;
+  display: flex;
+  align-items: center;
+  padding: 0 28px;
+  gap: 14px;
+  pointer-events: none;
+}
+
+.hint-bar.visible {
+  height: 28px;
+  border-top-color: var(--border);
+}
+
+.hint-bar-tag {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  color: var(--accent);
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.2s 0.05s;
+}
+
+.hint-bar.visible .hint-bar-tag {
+  opacity: 1;
+}
+
+.hint-bar-divider {
+  width: 1px;
+  height: 12px;
+  background: var(--border);
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.2s 0.05s;
+}
+
+.hint-bar.visible .hint-bar-divider {
+  opacity: 1;
+}
+
+.hint-bar-text {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 9px;
+  font-weight: 300;
+  letter-spacing: 0.04em;
+  color: var(--text-mid);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0;
+  transform: translateY(3px);
+  transition: opacity 0.18s 0.06s, transform 0.18s 0.06s;
+}
+
+.hint-bar.visible .hint-bar-text {
+  opacity: 1;
+  transform: translateY(0);
+}
 </style>
 </head>
 <body>
 
 <div class="beat-overlay" id="beatOverlay"></div>
+
+<!-- Bridge Setup Wizard Modal -->
+<div class="modal-overlay" id="bridgeModal">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">BRIDGE SETUP</span>
+      <button class="modal-close" id="bridgeModalClose">&times;</button>
+    </div>
+    <div class="modal-body">
+      <!-- Connection status -->
+      <div class="wiz-status" id="wizStatus">
+        <span class="wiz-status-dot"></span>
+        <span class="wiz-status-text" id="wizStatusText">NOT CONNECTED</span>
+      </div>
+
+      <!-- Step 1: Discover -->
+      <div class="wiz-step">
+        <div class="wiz-step-num">01 DISCOVER</div>
+        <div class="wiz-step-label">Find Hue Bridge on your network</div>
+        <div class="wiz-row">
+          <button class="wiz-btn" id="wizDiscover">DISCOVER</button>
+          <span class="wiz-value" id="wizBridgeIp">---</span>
+        </div>
+        <div class="wiz-msg" id="wizDiscoverMsg"></div>
+      </div>
+
+      <!-- Step 2: Pair -->
+      <div class="wiz-step">
+        <div class="wiz-step-num">02 PAIR</div>
+        <div class="wiz-step-label">Press the link button on your bridge, then click PAIR</div>
+        <div class="wiz-row">
+          <button class="wiz-btn" id="wizPair" disabled>PAIR</button>
+          <span class="wiz-value" id="wizPairStatus">---</span>
+        </div>
+        <div class="wiz-msg" id="wizPairMsg"></div>
+      </div>
+
+      <!-- Step 3: Select area -->
+      <div class="wiz-step">
+        <div class="wiz-step-num">03 ENTERTAINMENT AREA</div>
+        <div class="wiz-step-label">Select the entertainment area to control</div>
+        <div class="wiz-row">
+          <select class="wiz-select" id="wizAreaSelect" disabled>
+            <option value="">-- select area --</option>
+          </select>
+          <button class="wiz-btn" id="wizRefreshAreas" disabled>REFRESH</button>
+        </div>
+        <div class="wiz-msg" id="wizAreaMsg"></div>
+      </div>
+
+      <!-- Step 4: Connect -->
+      <div class="wiz-step">
+        <div class="wiz-step-num">04 CONNECT</div>
+        <div class="wiz-step-label">Start the entertainment stream</div>
+        <div class="wiz-row">
+          <button class="wiz-btn" id="wizConnect" disabled>CONNECT</button>
+          <button class="wiz-btn" id="wizDisconnect" disabled>DISCONNECT</button>
+        </div>
+        <div class="wiz-msg" id="wizConnectMsg"></div>
+      </div>
+
+      <!-- Step 5: Save -->
+      <div class="wiz-step">
+        <div class="wiz-step-num">05 PERSIST</div>
+        <div class="wiz-step-label">Save config for quick connect next time (won't auto-connect)</div>
+        <div class="wiz-row">
+          <button class="wiz-btn" id="wizSave" disabled>SAVE CONFIG</button>
+          <button class="wiz-btn danger" id="wizForget">FORGET BRIDGE</button>
+        </div>
+        <div class="wiz-msg" id="wizSaveMsg"></div>
+      </div>
+    </div>
+  </div>
+</div>
 
 <div class="container">
   <header class="header">
@@ -563,6 +1042,14 @@ body::after {
       <div class="title-sub">VISUALIZER</div>
     </div>
     <div class="header-right">
+      <div class="header-input-group">
+        <label class="header-input-label">INPUT</label>
+        <select class="device-select" id="audioDeviceSelect" disabled>
+          <option value="">Loading devices...</option>
+        </select>
+        <button class="device-refresh" id="btnRefreshDevices" title="Refresh device list">&#8635;</button>
+      </div>
+      <button class="bridge-btn" id="btnBridge" title="Bridge setup">BRIDGE</button>
       <div class="status" id="status">
         <span class="status-dot"></span>
         <span class="status-text">CONNECTING</span>
@@ -591,42 +1078,43 @@ body::after {
   </section>
 
   <section class="light-preview">
-    <span class="light-preview-label">LIGHTS</span>
+    <span class="light-preview-label" data-hint="Live preview of each light's current color. PREVIEW = simulated, STREAMING = sending to bridge">LIGHTS</span>
     <div class="light-dots" id="lightDots"></div>
     <span class="light-status" id="lightStatus">PREVIEW</span>
   </section>
 
   <section class="meters">
     <div class="meter">
-      <span class="meter-label">LEVEL</span>
+      <span class="meter-label" data-hint="Audio input volume (RMS)">LEVEL</span>
       <div class="meter-track"><div class="meter-fill" id="levelFill"></div></div>
       <span class="meter-value" id="levelVal">0.00</span>
     </div>
     <div class="meter">
-      <span class="meter-label">BEAT</span>
+      <span class="meter-label" data-hint="Beat detection strength — spikes on detected beats">BEAT</span>
       <div class="meter-track"><div class="meter-fill accent" id="beatFill"></div></div>
       <span class="meter-value" id="beatVal">0.00</span>
     </div>
     <div class="meter">
-      <span class="meter-label">CENT</span>
+      <span class="meter-label" data-hint="Spectral centroid — higher = brighter/sharper sound">CENT</span>
       <div class="meter-track"><div class="meter-fill" id="centroidFill"></div></div>
       <span class="meter-value" id="centroidVal">0</span>
     </div>
   </section>
 
+
   <section class="controls-row">
     <div class="control">
-      <label>SENSITIVITY</label>
+      <label data-hint="Beat detection threshold. Lower = more beats detected, higher = only strong beats">SENSITIVITY</label>
       <input type="range" id="ctrlSensitivity" min="10" max="30" value="14" step="1">
       <span class="control-val" id="valSensitivity">1.4</span>
     </div>
     <div class="control">
-      <label>BASS BOOST</label>
+      <label data-hint="Low frequency amplification. Compensates for how we hear bass quieter">BASS BOOST</label>
       <input type="range" id="ctrlBassBoost" min="10" max="50" value="20" step="1">
       <span class="control-val" id="valBassBoost">2.0</span>
     </div>
     <div class="control">
-      <label>COOLDOWN</label>
+      <label data-hint="Minimum ms between beats. Prevents double-triggers on complex rhythms">COOLDOWN</label>
       <input type="range" id="ctrlCooldown" min="50" max="1000" value="300" step="10">
       <span class="control-val" id="valCooldown">300</span>
     </div>
@@ -634,7 +1122,7 @@ body::after {
 
   <section class="controls-row">
     <div class="control">
-      <label>SPATIAL</label>
+      <label data-hint="How effects spread across your lights — UNI: all same / FREQ: per-band / WAVE: ripple / CHASE: sequential">SPATIAL</label>
       <div class="btn-group" id="spatialBtns">
         <button data-mode="uniform">UNI</button>
         <button data-mode="frequency_zones" class="active">FREQ</button>
@@ -645,7 +1133,7 @@ body::after {
       </div>
     </div>
     <div class="control">
-      <label>GENRE</label>
+      <label data-hint="Optimized parameters for each music style. Changes sensitivity, timing, and color behavior">GENRE</label>
       <div class="btn-group" id="genreBtns">
         <button data-genre="techno" class="active">TECHNO</button>
         <button data-genre="house">HOUSE</button>
@@ -657,7 +1145,7 @@ body::after {
 
   <section class="controls-row">
     <div class="control">
-      <label>INTENSITY</label>
+      <label data-hint="Overall effect strength. Affects flash speed, brightness, and beat sensitivity">INTENSITY</label>
       <div class="btn-group" id="intensityBtns">
         <button data-intensity="intense">INTENSE</button>
         <button data-intensity="normal" class="active">NORMAL</button>
@@ -665,7 +1153,7 @@ body::after {
       </div>
     </div>
     <div class="control">
-      <label>FX SIZE</label>
+      <label data-hint="How many lights react per beat. 1L = single rotating light, ALL = every light">FX SIZE</label>
       <div class="btn-group" id="effectsSizeBtns">
         <button data-fxsize="1L">1L</button>
         <button data-fxsize="25%">25%</button>
@@ -674,21 +1162,21 @@ body::after {
       </div>
     </div>
     <div class="control">
-      <label>SAFETY</label>
+      <label data-hint="Epilepsy protection. Limits flash rate to max 3Hz, blocks red strobes">SAFETY</label>
       <button class="btn-safe-mode" id="btnSafeMode">SAFE MODE</button>
     </div>
   </section>
 
   <section class="controls-row">
     <div class="control">
-      <label>COLOR</label>
+      <label data-hint="Color source: fixed palette or driven by audio frequency content (centroid)">COLOR</label>
       <div class="btn-group" id="colorModeBtns">
         <button data-mode="palette" class="active">PALETTE</button>
         <button data-mode="centroid">CENTROID</button>
       </div>
     </div>
     <div class="control">
-      <label>PALETTE</label>
+      <label data-hint="Color scheme for the lights. Genre palettes are tuned per style">PALETTE</label>
       <div class="btn-group" id="paletteBtns">
         <button data-palette="neon">NEON</button>
         <button data-palette="warm">WARM</button>
@@ -705,7 +1193,7 @@ body::after {
       </div>
     </div>
     <div class="control">
-      <label>GENERATE</label>
+      <label data-hint="Create a random palette using color theory. Click again for a new variation">GENERATE</label>
       <div class="btn-group" id="paletteAlgoBtns">
         <button data-algo="complementary">COMP</button>
         <button data-algo="triadic">TRIAD</button>
@@ -716,17 +1204,17 @@ body::after {
 
   <section class="controls-row">
     <div class="control">
-      <label>SATURATION</label>
+      <label data-hint="Color intensity. 100% = vivid colors, 0% = grayscale">SATURATION</label>
       <input type="range" id="ctrlSaturation" min="0" max="100" value="100" step="1">
       <span class="control-val" id="valSaturation">100%</span>
     </div>
     <div class="control">
-      <label>MIN BRIGHT</label>
+      <label data-hint="Lights never go darker than this. Raise for ambient glow during quiet parts">MIN BRIGHT</label>
       <input type="range" id="ctrlBrightMin" min="0" max="100" value="0" step="1">
       <span class="control-val" id="valBrightMin">0%</span>
     </div>
     <div class="control">
-      <label>MAX BRIGHT</label>
+      <label data-hint="Brightness ceiling. Lower to protect eyes or reduce light intensity">MAX BRIGHT</label>
       <input type="range" id="ctrlBrightMax" min="0" max="100" value="100" step="1">
       <span class="control-val" id="valBrightMax">100%</span>
     </div>
@@ -734,7 +1222,7 @@ body::after {
 
   <section class="controls-row">
     <div class="control">
-      <label>CALIB DELAY</label>
+      <label data-hint="Timing offset to sync lights with audio. Increase if lights feel late">CALIB DELAY</label>
       <input type="range" id="ctrlCalibDelay" min="0" max="600" value="0" step="10">
       <span class="control-val" id="valCalibDelay">0ms</span>
     </div>
@@ -742,16 +1230,16 @@ body::after {
 
   <section class="controls-row">
     <div class="control">
-      <label>FLASH</label>
+      <label data-hint="Beat flashes in pure white instead of the current palette color">FLASH</label>
       <button class="btn-white-flash" id="btnWhiteFlash">WHITE FLASH</button>
     </div>
     <div class="control">
-      <label>TRIGGER</label>
+      <label data-hint="Manual triggers. FLASH = one-shot burst, STROBE = rapid burst (respects safety limits)">TRIGGER</label>
       <button class="btn-trigger" id="btnFlash">FLASH</button>
       <button class="btn-trigger" id="btnStrobe">STROBE</button>
     </div>
     <div class="control">
-      <label>PRESETS</label>
+      <label data-hint="Save/load all current settings to 3 slots. Stored in browser localStorage">PRESETS</label>
       <button class="btn-preset" id="presetSave1" data-slot="1">SAVE 1</button>
       <button class="btn-preset" id="presetSave2" data-slot="2">SAVE 2</button>
       <button class="btn-preset" id="presetSave3" data-slot="3">SAVE 3</button>
@@ -760,6 +1248,13 @@ body::after {
       <button class="btn-preset" id="presetLoad3" data-slot="3">LOAD 3</button>
     </div>
   </section>
+</div>
+
+<!-- Hint bar — slides up from bottom on label hover -->
+<div class="hint-bar" id="hintBar">
+  <span class="hint-bar-tag" id="hintBarTag"></span>
+  <span class="hint-bar-divider"></span>
+  <span class="hint-bar-text" id="hintBarText"></span>
 </div>
 
 <script>
@@ -851,6 +1346,7 @@ function connect() {
     _uiSynced = false;  // Reset so sliders sync on first message (B.10)
     $status.classList.add('connected');
     $status.querySelector('.status-text').textContent = 'CONNECTED';
+    loadAudioDevices();
   };
 
   ws.onmessage = function(e) {
@@ -886,6 +1382,9 @@ function connect() {
       S.spatialMode = d.spatial_mode;
     }
 
+    // Update bridge button status from WS data
+    updateBridgeStatus(d);
+
     // Sync UI controls to server state (B.10)
     syncUIState(d);
   };
@@ -905,6 +1404,45 @@ function send(type, value) {
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({ type: type, value: value }));
   }
+}
+
+function loadAudioDevices() {
+  var $sel = document.getElementById('audioDeviceSelect');
+  $sel.disabled = true;
+  while ($sel.firstChild) $sel.removeChild($sel.firstChild);
+  var loadOpt = document.createElement('option');
+  loadOpt.value = '';
+  loadOpt.textContent = 'Loading...';
+  $sel.appendChild(loadOpt);
+  fetch('/api/audio/devices')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      while ($sel.firstChild) $sel.removeChild($sel.firstChild);
+      var defOpt = document.createElement('option');
+      defOpt.value = '';
+      defOpt.textContent = '(System Default)';
+      $sel.appendChild(defOpt);
+      (data.devices || []).forEach(function(dev) {
+        var opt = document.createElement('option');
+        opt.value = dev.index;
+        opt.textContent = dev.name + ' (' + dev.channels + 'ch, ' + dev.sample_rate + 'Hz)';
+        $sel.appendChild(opt);
+      });
+      if (data.current_device_index !== null && data.current_device_index !== undefined) {
+        $sel.value = String(data.current_device_index);
+      } else {
+        $sel.value = '';
+      }
+      $sel.disabled = false;
+    })
+    .catch(function(err) {
+      console.error('Failed to load audio devices:', err);
+      while ($sel.firstChild) $sel.removeChild($sel.firstChild);
+      var errOpt = document.createElement('option');
+      errOpt.value = '';
+      errOpt.textContent = 'Error loading devices';
+      $sel.appendChild(errOpt);
+    });
 }
 
 // Sync UI controls to server state (B.10)
@@ -979,6 +1517,15 @@ function syncUIState(d) {
   if (typeof d.white_flash === 'boolean') {
     var $wf = document.getElementById('btnWhiteFlash');
     if ($wf) $wf.classList.toggle('active', d.white_flash);
+  }
+
+  // Audio device sync
+  if (typeof d.audio_device_index !== 'undefined') {
+    var $devSel = document.getElementById('audioDeviceSelect');
+    var newVal = d.audio_device_index !== null ? String(d.audio_device_index) : '';
+    if ($devSel.value !== newVal && !$devSel.disabled) {
+      $devSel.value = newVal;
+    }
   }
 
   // Sync sliders only once per connection to avoid overriding user dragging
@@ -1297,6 +1844,16 @@ function tick() {
 
 // Controls
 function initControls() {
+  // Audio device selector
+  var $devSel = document.getElementById('audioDeviceSelect');
+  $devSel.addEventListener('change', function() {
+    var val = $devSel.value;
+    send('set_audio_device', val === '' ? null : parseInt(val));
+  });
+  document.getElementById('btnRefreshDevices').addEventListener('click', function() {
+    loadAudioDevices();
+  });
+
   var $sens = document.getElementById('ctrlSensitivity');
   var $bass = document.getElementById('ctrlBassBoost');
   var $cd = document.getElementById('ctrlCooldown');
@@ -1711,10 +2268,381 @@ function initPresets() {
   _updatePresetButtonStates();
 }
 
+// --- Bridge Setup Wizard ---
+var _wizState = {
+  bridgeIp: null,
+  username: null,
+  clientkey: null,
+  areaId: null,
+  connected: false,
+  areas: {}
+};
+
+function initBridgeWizard() {
+  var $modal = document.getElementById('bridgeModal');
+  var $btnBridge = document.getElementById('btnBridge');
+  var $close = document.getElementById('bridgeModalClose');
+
+  $btnBridge.addEventListener('click', function() {
+    $modal.classList.add('visible');
+    _wizRefreshStatus();
+  });
+
+  $close.addEventListener('click', function() {
+    $modal.classList.remove('visible');
+  });
+
+  // Close on overlay click (but not modal body click)
+  $modal.addEventListener('click', function(e) {
+    if (e.target === $modal) $modal.classList.remove('visible');
+  });
+
+  // Step 1: Discover
+  document.getElementById('wizDiscover').addEventListener('click', _wizDoDiscover);
+
+  // Step 2: Pair
+  document.getElementById('wizPair').addEventListener('click', _wizDoPair);
+
+  // Step 3: Areas
+  document.getElementById('wizRefreshAreas').addEventListener('click', _wizDoRefreshAreas);
+
+  // Step 4: Connect / Disconnect
+  document.getElementById('wizConnect').addEventListener('click', _wizDoConnect);
+  document.getElementById('wizDisconnect').addEventListener('click', _wizDoDisconnect);
+
+  // Step 5: Save / Forget
+  document.getElementById('wizSave').addEventListener('click', _wizDoSave);
+  document.getElementById('wizForget').addEventListener('click', _wizDoForget);
+
+  // Initial status check
+  _wizRefreshStatus();
+}
+
+function _wizRefreshStatus() {
+  fetch('/api/bridge/status')
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      _wizState.connected = d.connected;
+      var $status = document.getElementById('wizStatus');
+      var $text = document.getElementById('wizStatusText');
+      var $btnBridge = document.getElementById('btnBridge');
+
+      if (d.connected) {
+        $status.classList.add('connected');
+        $status.classList.remove('saved');
+        $text.textContent = 'CONNECTED  ' + (d.bridge_ip || '') + '  (' + d.num_lights + ' lights)';
+        $btnBridge.classList.add('connected');
+        $btnBridge.textContent = 'BRIDGE: ' + (d.bridge_ip || 'ON');
+        _wizState.bridgeIp = d.bridge_ip;
+        _wizState.areaId = d.area_id;
+        document.getElementById('wizDisconnect').disabled = false;
+        document.getElementById('wizSave').disabled = false;
+        document.getElementById('wizConnect').disabled = true;
+      } else if (d.has_saved_config) {
+        // Saved config exists but not connected — show saved info, enable CONNECT
+        $status.classList.remove('connected');
+        $status.classList.add('saved');
+        $text.textContent = 'SAVED  ' + (d.saved_bridge_ip || '???') + (d.saved_area_id ? '  (area ' + d.saved_area_id + ')' : '') + '  — click CONNECT';
+        $btnBridge.classList.remove('connected');
+        $btnBridge.textContent = 'BRIDGE: ' + (d.saved_bridge_ip || 'SAVED');
+        _wizState.bridgeIp = d.saved_bridge_ip;
+        _wizState.areaId = d.saved_area_id;
+        document.getElementById('wizConnect').disabled = false;
+        document.getElementById('wizDisconnect').disabled = true;
+        document.getElementById('wizSave').disabled = true;
+        document.getElementById('wizBridgeIp').textContent = d.saved_bridge_ip || '---';
+        document.getElementById('wizBridgeIp').className = 'wiz-value success';
+        document.getElementById('wizPairStatus').textContent = 'SAVED';
+        document.getElementById('wizPairStatus').className = 'wiz-value success';
+      } else {
+        $status.classList.remove('connected');
+        $status.classList.remove('saved');
+        $text.textContent = 'NOT CONNECTED';
+        $btnBridge.classList.remove('connected');
+        $btnBridge.textContent = 'BRIDGE';
+        document.getElementById('wizConnect').disabled = true;
+        document.getElementById('wizDisconnect').disabled = true;
+      }
+    })
+    .catch(function() {});
+}
+
+function _wizSetMsg(id, text, cls) {
+  var $el = document.getElementById(id);
+  $el.textContent = text;
+  $el.className = 'wiz-msg' + (cls ? ' ' + cls : '');
+}
+
+function _wizSetMsgWithSpinner(id, text) {
+  var $el = document.getElementById(id);
+  $el.className = 'wiz-msg waiting';
+  // Clear existing content
+  while ($el.firstChild) $el.removeChild($el.firstChild);
+  // Add spinner span
+  var spinner = document.createElement('span');
+  spinner.className = 'wiz-spinner';
+  $el.appendChild(spinner);
+  // Add text node
+  $el.appendChild(document.createTextNode(text));
+}
+
+async function _wizDoDiscover() {
+  var $btn = document.getElementById('wizDiscover');
+  var $ip = document.getElementById('wizBridgeIp');
+  $btn.disabled = true;
+  $btn.textContent = 'SEARCHING...';
+  _wizSetMsg('wizDiscoverMsg', '', '');
+
+  try {
+    var resp = await fetch('/api/bridge/discover', { method: 'POST' });
+    var data = await resp.json();
+
+    if (resp.ok && data.ip) {
+      _wizState.bridgeIp = data.ip;
+      $ip.textContent = data.ip;
+      $ip.className = 'wiz-value success';
+      _wizSetMsg('wizDiscoverMsg', 'Bridge found!', 'success');
+      // Enable pair button
+      document.getElementById('wizPair').disabled = false;
+    } else {
+      $ip.textContent = '---';
+      $ip.className = 'wiz-value error';
+      _wizSetMsg('wizDiscoverMsg', data.error || 'No bridge found.', 'error');
+    }
+  } catch (e) {
+    _wizSetMsg('wizDiscoverMsg', 'Network error: ' + e.message, 'error');
+  }
+
+  $btn.disabled = false;
+  $btn.textContent = 'DISCOVER';
+}
+
+async function _wizDoPair() {
+  var $btn = document.getElementById('wizPair');
+  var $status = document.getElementById('wizPairStatus');
+  $btn.disabled = true;
+  $status.textContent = '';
+  _wizSetMsgWithSpinner('wizPairMsg', 'Press bridge button... waiting up to 30s');
+
+  try {
+    var body = {};
+    if (_wizState.bridgeIp) body.ip = _wizState.bridgeIp;
+
+    var resp = await fetch('/api/bridge/pair', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    var data = await resp.json();
+
+    if (resp.ok && data.username) {
+      _wizState.username = data.username;
+      _wizState.clientkey = data.clientkey;
+      _wizState.bridgeIp = data.bridge_ip;
+      $status.textContent = 'PAIRED';
+      $status.className = 'wiz-value success';
+      document.getElementById('wizBridgeIp').textContent = data.bridge_ip;
+      document.getElementById('wizBridgeIp').className = 'wiz-value success';
+      _wizSetMsg('wizPairMsg', 'Successfully paired! Username and clientkey obtained.', 'success');
+      // Enable area selection
+      document.getElementById('wizRefreshAreas').disabled = false;
+      document.getElementById('wizAreaSelect').disabled = false;
+      // Auto-load areas
+      _wizDoRefreshAreas();
+    } else {
+      $status.textContent = 'FAILED';
+      $status.className = 'wiz-value error';
+      _wizSetMsg('wizPairMsg', data.error || 'Pairing failed.', 'error');
+    }
+  } catch (e) {
+    _wizSetMsg('wizPairMsg', 'Network error: ' + e.message, 'error');
+  }
+
+  $btn.disabled = false;
+}
+
+async function _wizDoRefreshAreas() {
+  var $select = document.getElementById('wizAreaSelect');
+  _wizSetMsg('wizAreaMsg', '', '');
+
+  var params = new URLSearchParams();
+  if (_wizState.bridgeIp) params.set('ip', _wizState.bridgeIp);
+  if (_wizState.username) params.set('username', _wizState.username);
+
+  try {
+    var resp = await fetch('/api/bridge/areas?' + params.toString());
+    var data = await resp.json();
+
+    if (resp.ok && data.areas) {
+      _wizState.areas = data.areas;
+      // Clear dropdown safely
+      while ($select.firstChild) $select.removeChild($select.firstChild);
+      var keys = Object.keys(data.areas);
+
+      if (keys.length === 0) {
+        var emptyOpt = document.createElement('option');
+        emptyOpt.value = '';
+        emptyOpt.textContent = 'No entertainment areas found';
+        $select.appendChild(emptyOpt);
+        _wizSetMsg('wizAreaMsg', 'Create an Entertainment Area in the Hue app first.', 'error');
+        return;
+      }
+
+      for (var i = 0; i < keys.length; i++) {
+        var id = keys[i];
+        var area = data.areas[id];
+        var opt = document.createElement('option');
+        opt.value = id;
+        opt.textContent = area.name + ' (' + area.num_lights + ' lights)';
+        $select.appendChild(opt);
+      }
+
+      // Auto-select first
+      _wizState.areaId = keys[0];
+      $select.value = keys[0];
+      $select.disabled = false;
+
+      // Listen for selection changes
+      $select.onchange = function() {
+        _wizState.areaId = $select.value;
+      };
+
+      // Enable connect
+      document.getElementById('wizConnect').disabled = false;
+      _wizSetMsg('wizAreaMsg', keys.length + ' area(s) found.', 'success');
+    } else {
+      _wizSetMsg('wizAreaMsg', data.error || 'Failed to load areas.', 'error');
+    }
+  } catch (e) {
+    _wizSetMsg('wizAreaMsg', 'Network error: ' + e.message, 'error');
+  }
+}
+
+async function _wizDoConnect() {
+  var $btn = document.getElementById('wizConnect');
+  $btn.disabled = true;
+  $btn.textContent = 'CONNECTING...';
+  _wizSetMsg('wizConnectMsg', '', '');
+
+  try {
+    var body = {};
+    if (_wizState.bridgeIp) body.ip = _wizState.bridgeIp;
+    if (_wizState.username) body.username = _wizState.username;
+    if (_wizState.clientkey) body.clientkey = _wizState.clientkey;
+    if (_wizState.areaId) body.area_id = _wizState.areaId;
+
+    var resp = await fetch('/api/bridge/connect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    var data = await resp.json();
+
+    if (resp.ok && data.connected) {
+      _wizSetMsg('wizConnectMsg', 'Connected! ' + data.num_lights + ' lights streaming.', 'success');
+      document.getElementById('wizSave').disabled = false;
+      _wizRefreshStatus();
+    } else {
+      _wizSetMsg('wizConnectMsg', data.error || 'Connection failed.', 'error');
+    }
+  } catch (e) {
+    _wizSetMsg('wizConnectMsg', 'Network error: ' + e.message, 'error');
+  }
+
+  $btn.disabled = false;
+  $btn.textContent = 'CONNECT';
+}
+
+async function _wizDoDisconnect() {
+  try {
+    await fetch('/api/bridge/disconnect', { method: 'POST' });
+    _wizSetMsg('wizConnectMsg', 'Disconnected.', '');
+    _wizRefreshStatus();
+  } catch (e) {
+    _wizSetMsg('wizConnectMsg', 'Error: ' + e.message, 'error');
+  }
+}
+
+async function _wizDoSave() {
+  _wizSetMsg('wizSaveMsg', '', '');
+  try {
+    var resp = await fetch('/api/bridge/save', { method: 'POST' });
+    var data = await resp.json();
+    if (resp.ok) {
+      _wizSetMsg('wizSaveMsg', 'Config saved. Bridge will auto-connect on next start.', 'success');
+    } else {
+      _wizSetMsg('wizSaveMsg', data.error || 'Save failed.', 'error');
+    }
+  } catch (e) {
+    _wizSetMsg('wizSaveMsg', 'Error: ' + e.message, 'error');
+  }
+}
+
+async function _wizDoForget() {
+  _wizSetMsg('wizSaveMsg', '', '');
+  try {
+    var resp = await fetch('/api/bridge/config', { method: 'DELETE' });
+    var data = await resp.json();
+    if (resp.ok) {
+      _wizSetMsg('wizSaveMsg', 'Saved config cleared.', '');
+    } else {
+      _wizSetMsg('wizSaveMsg', data.error || 'Failed.', 'error');
+    }
+  } catch (e) {
+    _wizSetMsg('wizSaveMsg', 'Error: ' + e.message, 'error');
+  }
+}
+
+// Update bridge button state from WS data
+function updateBridgeStatus(d) {
+  var $btn = document.getElementById('btnBridge');
+  var newText, connected;
+  if (d.lights_active && d.bridge_ip) {
+    newText = 'BRIDGE: ' + d.bridge_ip;
+    connected = true;
+  } else if (d.lights_active) {
+    newText = 'BRIDGE: ON';
+    connected = true;
+  } else {
+    newText = 'BRIDGE';
+    connected = false;
+  }
+  // Only touch DOM when value actually changed — avoids 30Hz text node
+  // recreation that swallows click events on the button text.
+  if ($btn.textContent !== newText) $btn.textContent = newText;
+  if (connected) { $btn.classList.add('connected'); }
+  else { $btn.classList.remove('connected'); }
+}
+
+// --- Hint bar system ---
+function initHints() {
+  var $bar = document.getElementById('hintBar');
+  var $tag = document.getElementById('hintBarTag');
+  var $text = document.getElementById('hintBarText');
+  var hideTimer = null;
+
+  var hintEls = document.querySelectorAll('[data-hint]');
+  hintEls.forEach(function(el) {
+    el.addEventListener('mouseenter', function() {
+      if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+      $tag.textContent = el.textContent.replace(/\?$/, '').trim();
+      $text.textContent = el.getAttribute('data-hint');
+      $bar.classList.add('visible');
+    });
+    el.addEventListener('mouseleave', function() {
+      hideTimer = setTimeout(function() {
+        $bar.classList.remove('visible');
+      }, 120);
+    });
+  });
+}
+
 // Init
 function init() {
   initCanvases();
   initControls();
+  initBridgeWizard();
+  initHints();
   connect();
   requestAnimationFrame(tick);
 }

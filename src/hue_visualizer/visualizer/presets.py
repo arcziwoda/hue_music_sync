@@ -120,7 +120,7 @@ PRESETS: dict[str, GenrePreset] = {
     "techno": GenrePreset(
         name="techno",
         beat_threshold=1.3,
-        beat_cooldown_ms=280,
+        beat_cooldown_ms=300,
         bass_boost=2.5,
         bpm_min=120.0,
         bpm_max=150.0,
@@ -148,7 +148,7 @@ PRESETS: dict[str, GenrePreset] = {
     "dnb": GenrePreset(
         name="dnb",
         beat_threshold=1.2,
-        beat_cooldown_ms=200,
+        beat_cooldown_ms=250,
         bass_boost=3.0,
         bpm_min=155.0,
         bpm_max=185.0,

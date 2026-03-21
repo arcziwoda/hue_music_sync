@@ -329,10 +329,11 @@ class BeatDetector:
         elif self._smooth_bpm == 0:
             self._display_bpm = 0
 
-        # Auto-cooldown: set cooldown to ~60% of beat period when BPM is known
+        # Auto-cooldown: set cooldown to ~75% of beat period when BPM is known
+        # (research minimum: 300ms refractory period)
         if self.auto_cooldown and self._display_bpm > 0:
             beat_period = 60.0 / self._display_bpm
-            self.cooldown_sec = max(0.05, beat_period * 0.6)
+            self.cooldown_sec = max(0.25, beat_period * 0.75)
 
         # Fill output
         info.bpm = round(self._display_bpm, 1)

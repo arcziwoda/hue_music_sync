@@ -41,6 +41,7 @@ Auto-splits lights into 2-3 subgroups with different palette phase offsets,
 creating color variety across the light array.
 """
 
+import logging
 import math
 import random
 import time
@@ -53,6 +54,8 @@ from ..bridge.entertainment_controller import LightState
 from ..utils.color_conversion import hsv_to_xy
 from .color_mapper import ColorMapper, _ema, _smooth_hue, COLOR_MODE_CENTROID, COLOR_MODES
 from .spatial import SpatialMapper
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -396,6 +399,7 @@ class EffectEngine:
         self._base_max_flash_hz = max_flash_hz
         self._min_flash_interval = 1.0 / max(max_flash_hz, 0.1)
         self._last_flash_time = 0.0
+        self._last_onset_flash_time = 0.0  # Separate rate limiter for per-band onsets
 
         # --- Safe mode (Task 2.5) ---
         self._safe_mode: bool = False
@@ -699,7 +703,8 @@ class EffectEngine:
 
         # --- 5d. Bass pulse overlay (Task 1.10) ---
         # Kick onset triggers red/orange pulse on bass-dominant lights
-        if beat_info.kick_onset:
+        # Gated by onset rate limiter to prevent too-frequent flashing
+        if beat_info.kick_onset and (now - self._last_onset_flash_time) >= self._min_flash_interval:
             bass_strength = min(1.0, beat_info.kick_energy * self._bass_pulse_intensity * 2.0)
             # Map bass energy to hue within red-orange range (0-30 deg)
             bass_hue = self._bass_pulse_hue_min + (
@@ -723,10 +728,12 @@ class EffectEngine:
                     # Uniform/wave: apply to all lights equally
                     light.bass_pulse_brightness = bass_strength
                 light.bass_pulse_hue = bass_hue
+            self._last_onset_flash_time = now
 
         # --- 5e. Treble sparkle overlay (Task 1.9) ---
         # Hi-hat onset triggers brief blue/violet flicker on 1-2 random lights
-        if beat_info.hihat_onset:
+        # Gated by onset rate limiter to prevent stacking with other flashes
+        if beat_info.hihat_onset and (now - self._last_onset_flash_time) >= self._min_flash_interval:
             sparkle_strength = min(1.0, beat_info.hihat_energy * self._sparkle_intensity * 2.0)
             # Random hue within blue-violet range
             sparkle_hue = random.uniform(self._sparkle_hue_min, self._sparkle_hue_max)
@@ -743,6 +750,7 @@ class EffectEngine:
             for idx in sparkle_targets:
                 self._lights[idx].sparkle_brightness = sparkle_strength
                 self._lights[idx].sparkle_hue = sparkle_hue
+            self._last_onset_flash_time = now
 
         # --- 6. Per-light: flash decay + EMA smoothing + safety ---
         # Section-modulated flash decay (faster during DROP for punchy feel)
@@ -1523,6 +1531,23 @@ class EffectEngine:
         # Also update generative layer positions for consistent spatial wave
         if len(positions) == self.num_lights:
             self._generative._positions = list(positions)
+
+    def set_num_lights(self, num_lights: int) -> None:
+        """Change the number of lights at runtime (e.g. after bridge connect).
+
+        Re-creates the internal light state array and resets spatial data.
+        """
+        num_lights = max(num_lights, 1)
+        if num_lights == self.num_lights:
+            return
+        self.num_lights = num_lights
+        self._lights = [_LightSmoothed() for _ in range(num_lights)]
+        self.spatial_mapper = SpatialMapper(
+            num_lights=num_lights, mode=self.spatial_mapper.mode
+        )
+        self._light_groups = list(range(num_lights))
+        self._update_active_lights()
+        logger.info(f"EffectEngine: num_lights changed to {num_lights}")
 
     # --- Intensity selector (Task 1.12) ---
 

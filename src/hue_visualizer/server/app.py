@@ -9,10 +9,23 @@ from pathlib import Path
 
 import numpy as np
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from ..audio import AudioCapture, AudioAnalyzer, AudioFeatures, BeatDetector, BeatInfo, BAND_NAMES, SectionDetector, SectionInfo
+from ..bridge.discovery import (
+    discover_bridge,
+    create_entertainment_user,
+    list_entertainment_areas,
+    verify_connection,
+)
+from ..bridge.entertainment_controller import EntertainmentController
 from ..core.config import Settings
+from ..core.exceptions import BridgeDiscoveryError, BridgeConnectionError
+from ..core.exceptions import AudioCaptureError
+from ..core.persistence import (
+    load_bridge_config, save_bridge_config, clear_bridge_config,
+    load_audio_device_preference, save_audio_device_preference, clear_audio_device_preference,
+)
 from ..utils.color_conversion import hsv_to_rgb
 from ..visualizer import EffectEngine
 from ..visualizer.engine import INTENSITY_LEVELS, INTENSITY_MULTIPLIERS, INTENSITY_NORMAL
@@ -110,6 +123,27 @@ class AudioPipeline:
     def stop(self):
         self.capture.stop()
         logger.info("Audio pipeline stopped")
+
+    def reset_analysis(self) -> None:
+        """Reset all analysis state after device switch."""
+        self.analyzer.reset()
+        self.beat_detector.reset()
+        self.section_detector.reset()
+        self.features = AudioFeatures()
+        self.beat_info = BeatInfo()
+        self.section_info = SectionInfo()
+        self._pending_beat = False
+        self._pending_beat_strength = 0.0
+        self._pending_kick = False
+        self._pending_snare = False
+        self._pending_hihat = False
+        self._peak_kick_energy = 0.0
+        self._peak_snare_energy = 0.0
+        self._peak_hihat_energy = 0.0
+        self._peak_rms = 0.0
+        self._peak_band_energies = np.zeros(7)
+        self._peak_spectral_flux = 0.0
+        self._peak_has_data = False
 
     @property
     def is_running(self) -> bool:
@@ -266,11 +300,17 @@ def _light_states_to_preview(engine: EffectEngine) -> list[dict]:
 manager = ConnectionManager()
 pipeline: AudioPipeline | None = None
 effect_engine: EffectEngine | None = None
-entertainment_ctrl = None  # EntertainmentController | None
+entertainment_ctrl: EntertainmentController | None = None
 settings: Settings | None = None
 current_genre: str = "techno"
 current_palette: str = "neon"
 current_intensity: str = INTENSITY_NORMAL
+
+# Bridge credentials currently in use (populated from .env or persistence or wizard)
+_bridge_ip: str | None = None
+_bridge_username: str | None = None
+_bridge_clientkey: str | None = None
+_bridge_area_id: str | None = None
 
 
 async def audio_loop():
@@ -353,7 +393,11 @@ async def audio_loop():
                 }
 
                 if effect_engine:
-                    data["lights_active"] = entertainment_ctrl is not None
+                    data["lights_active"] = (
+                        entertainment_ctrl is not None
+                        and entertainment_ctrl.is_connected
+                    )
+                    data["bridge_ip"] = _bridge_ip if entertainment_ctrl else None
                     data["spatial_mode"] = effect_engine.spatial_mapper.mode
                     data["light_preview"] = _light_states_to_preview(effect_engine)
                     data["genre"] = current_genre
@@ -388,6 +432,10 @@ async def audio_loop():
                     data["sensitivity"] = round(pipeline.beat_detector.base_threshold, 1)
                     data["bass_boost"] = round(pipeline.analyzer.bass_boost, 1)
                     data["cooldown_ms"] = round(pipeline.beat_detector.cooldown_sec * 1000)
+                    # Audio device info for UI sync
+                    dev = pipeline.capture.current_device_info
+                    data["audio_device"] = dev["name"] if dev else None
+                    data["audio_device_index"] = dev["index"] if dev else None
 
                 await manager.broadcast(json.dumps(data))
 
@@ -396,14 +444,101 @@ async def audio_loop():
         await asyncio.sleep(max(0, sleep_time))
 
 
+def _resolve_bridge_credentials() -> tuple[str | None, str | None, str | None, str | None]:
+    """Resolve bridge credentials: .env overrides persistent config.
+
+    Returns:
+        (ip, username, clientkey, area_id) -- any may be None.
+    """
+    # Start with persistent config
+    persisted = load_bridge_config()
+    ip = persisted.get("ip")
+    username = persisted.get("username")
+    clientkey = persisted.get("clientkey")
+    area_id = persisted.get("entertainment_area_id")
+
+    # .env / environment variables override persistent storage
+    if settings:
+        if settings.bridge_ip:
+            ip = settings.bridge_ip
+        if settings.hue_username:
+            username = settings.hue_username
+        if settings.hue_clientkey:
+            clientkey = settings.hue_clientkey
+        if settings.entertainment_area_id:
+            area_id = settings.entertainment_area_id
+
+    return ip, username, clientkey, area_id
+
+
+def _do_bridge_connect(
+    ip: str, username: str, clientkey: str, area_id: str | None
+) -> None:
+    """Connect to bridge and wire up the effect engine.
+
+    Mutates global state: entertainment_ctrl, effect_engine, _bridge_* vars.
+    Does NOT touch the audio pipeline.
+    """
+    global entertainment_ctrl, effect_engine
+    global _bridge_ip, _bridge_username, _bridge_clientkey, _bridge_area_id
+
+    ctrl = EntertainmentController(
+        bridge_ip=ip,
+        username=username,
+        clientkey=clientkey,
+        entertainment_area_id=area_id,
+    )
+    ctrl.connect()
+    entertainment_ctrl = ctrl
+
+    _bridge_ip = ip
+    _bridge_username = username
+    _bridge_clientkey = clientkey
+    _bridge_area_id = area_id
+
+    num_lights = ctrl._num_lights or (settings.num_lights if settings else 6)
+
+    if effect_engine:
+        effect_engine.set_num_lights(num_lights)
+        if ctrl.light_positions:
+            effect_engine.set_light_positions(ctrl.light_positions)
+            logger.info(
+                f"Light positions from bridge applied: "
+                f"{[round(p, 3) for p in ctrl.light_positions]}"
+            )
+
+    logger.info(f"Bridge connected: {ip}, {num_lights} lights")
+
+
+def _do_bridge_disconnect() -> None:
+    """Disconnect from bridge. Engine continues in preview mode."""
+    global entertainment_ctrl
+
+    if entertainment_ctrl:
+        try:
+            entertainment_ctrl.disconnect()
+        except Exception as e:
+            logger.error(f"Error disconnecting entertainment API: {e}")
+        entertainment_ctrl = None
+        logger.info("Bridge disconnected -- preview mode")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Start/stop audio pipeline, effect engine, and entertainment controller."""
     global pipeline, effect_engine, entertainment_ctrl, settings
+    global _bridge_ip, _bridge_username, _bridge_clientkey, _bridge_area_id
 
     settings = Settings()
 
     pipeline = AudioPipeline(settings)
+
+    # Resolve audio device: .env overrides persistent preference
+    saved_device = load_audio_device_preference()
+    device_index = settings.audio_device_index if settings.audio_device_index is not None else saved_device
+    if device_index is not None:
+        pipeline.capture.device_index = device_index
+        logger.info(f"Using saved audio device index: {device_index}")
 
     try:
         pipeline.start()
@@ -414,42 +549,35 @@ async def lifespan(app: FastAPI):
     # --- Effect engine (always created — drives UI preview even without bridge) ---
     num_lights = settings.num_lights
 
-    # --- Entertainment API (optional — only if bridge configured) ---
-    if settings.bridge_ip and settings.hue_username and settings.hue_clientkey:
-        try:
-            from ..bridge.entertainment_controller import EntertainmentController
+    # --- Resolve bridge credentials: .env overrides persistent config ---
+    # Credentials are loaded into globals but we do NOT auto-connect.
+    # The user connects manually from the UI (BRIDGE wizard → CONNECT).
+    ip, username, clientkey, area_id = _resolve_bridge_credentials()
+    _bridge_ip = ip
+    _bridge_username = username
+    _bridge_clientkey = clientkey
+    _bridge_area_id = area_id
 
-            ctrl = EntertainmentController(
-                bridge_ip=settings.bridge_ip,
-                username=settings.hue_username,
-                clientkey=settings.hue_clientkey,
-                entertainment_area_id=settings.entertainment_area_id,
-            )
-            ctrl.connect()
-            entertainment_ctrl = ctrl
-            num_lights = ctrl._num_lights or settings.num_lights
-            logger.info(f"Bridge connected: {num_lights} lights")
-        except Exception as e:
-            logger.error(f"Failed to start entertainment API: {e}")
-            logger.warning("Running without light control")
-            entertainment_ctrl = None
+    if ip and username and clientkey:
+        logger.info(f"Saved bridge config found: {ip} (area {area_id}) — connect from UI")
     else:
         logger.info("No bridge configured -- audio + preview mode")
 
-    effect_engine = EffectEngine(
-        num_lights=num_lights,
-        gamma=settings.brightness_gamma,
-        attack_alpha=settings.attack_alpha,
-        release_alpha=settings.release_alpha,
-        max_flash_hz=settings.max_flash_hz,
-        spatial_mode=settings.spatial_mode,
-        latency_compensation_ms=settings.latency_compensation_ms,
-        predictive_confidence_threshold=settings.predictive_confidence_threshold,
-        generative_hue_cycle_period=settings.generative_hue_cycle_period,
-        generative_breathing_rate_hz=settings.generative_breathing_rate_hz,
-        generative_breathing_min=settings.generative_breathing_min,
-        generative_breathing_max=settings.generative_breathing_max,
-    )
+    if not effect_engine:
+        effect_engine = EffectEngine(
+            num_lights=num_lights,
+            gamma=settings.brightness_gamma,
+            attack_alpha=settings.attack_alpha,
+            release_alpha=settings.release_alpha,
+            max_flash_hz=settings.max_flash_hz,
+            spatial_mode=settings.spatial_mode,
+            latency_compensation_ms=settings.latency_compensation_ms,
+            predictive_confidence_threshold=settings.predictive_confidence_threshold,
+            generative_hue_cycle_period=settings.generative_hue_cycle_period,
+            generative_breathing_rate_hz=settings.generative_breathing_rate_hz,
+            generative_breathing_min=settings.generative_breathing_min,
+            generative_breathing_max=settings.generative_breathing_max,
+        )
 
     # Task 2.6: Apply calibration delay from config
     if settings.calibration_delay_ms > 0:
@@ -490,11 +618,7 @@ async def lifespan(app: FastAPI):
         pass
     if pipeline:
         pipeline.stop()
-    if entertainment_ctrl:
-        try:
-            entertainment_ctrl.disconnect()
-        except Exception as e:
-            logger.error(f"Error disconnecting entertainment API: {e}")
+    _do_bridge_disconnect()
 
 
 app = FastAPI(title="Hue Visualizer", lifespan=lifespan)
@@ -520,6 +644,221 @@ async def websocket_endpoint(ws: WebSocket):
                 pass
     except WebSocketDisconnect:
         manager.disconnect(ws)
+
+
+# ---------------------------------------------------------------------------
+# Bridge setup wizard REST API
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/bridge/status")
+async def bridge_status():
+    """Return current bridge connection status and saved config info."""
+    connected = entertainment_ctrl is not None and entertainment_ctrl.is_connected
+    num_lights = entertainment_ctrl._num_lights if entertainment_ctrl else 0
+    has_saved = bool(_bridge_ip and _bridge_username and _bridge_clientkey)
+    return {
+        "connected": connected,
+        "bridge_ip": _bridge_ip if connected else None,
+        "num_lights": num_lights,
+        "area_id": _bridge_area_id if connected else None,
+        "has_saved_config": has_saved,
+        "saved_bridge_ip": _bridge_ip if has_saved else None,
+        "saved_area_id": _bridge_area_id if has_saved else None,
+    }
+
+
+@app.post("/api/bridge/discover")
+async def bridge_discover():
+    """Discover a Hue Bridge on the local network."""
+    try:
+        ip = await asyncio.get_event_loop().run_in_executor(None, discover_bridge)
+        return {"ip": ip}
+    except BridgeDiscoveryError as e:
+        return JSONResponse(status_code=404, content={"error": str(e)})
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.post("/api/bridge/pair")
+async def bridge_pair(body: dict | None = None):
+    """Pair with the bridge (user must press the link button).
+
+    Polls for up to 30 seconds waiting for the button press.
+
+    Request body (optional):
+        {"ip": "192.168.x.x"}   -- override discovered IP
+    """
+    ip = (body or {}).get("ip") or _bridge_ip
+    if not ip:
+        # Try auto-discover
+        try:
+            ip = await asyncio.get_event_loop().run_in_executor(None, discover_bridge)
+        except BridgeDiscoveryError as e:
+            return JSONResponse(
+                status_code=400,
+                content={"error": f"No bridge IP provided and discovery failed: {e}"},
+            )
+
+    # Poll for ~30 seconds (15 attempts x 2s sleep)
+    last_error = ""
+    for attempt in range(15):
+        try:
+            username, clientkey = await asyncio.get_event_loop().run_in_executor(
+                None, create_entertainment_user, ip
+            )
+            return {
+                "username": username,
+                "clientkey": clientkey,
+                "bridge_ip": ip,
+            }
+        except BridgeConnectionError as e:
+            last_error = str(e)
+            if "button not pressed" in last_error.lower() or "link button" in last_error.lower():
+                await asyncio.sleep(2)
+                continue
+            # Non-retryable error
+            return JSONResponse(status_code=400, content={"error": last_error})
+        except Exception as e:
+            return JSONResponse(status_code=500, content={"error": str(e)})
+
+    return JSONResponse(
+        status_code=408,
+        content={"error": "Timed out waiting for link button press. Please try again."},
+    )
+
+
+@app.get("/api/bridge/areas")
+async def bridge_areas(ip: str | None = None, username: str | None = None):
+    """List entertainment areas on the bridge.
+
+    Query params:
+        ip       -- bridge IP (defaults to current)
+        username -- API username (defaults to current)
+    """
+    _ip = ip or _bridge_ip
+    _user = username or _bridge_username
+    if not _ip or not _user:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "Bridge IP and username required"},
+        )
+
+    try:
+        areas = await asyncio.get_event_loop().run_in_executor(
+            None, list_entertainment_areas, _ip, _user
+        )
+        return {"areas": areas}
+    except BridgeConnectionError as e:
+        return JSONResponse(status_code=400, content={"error": str(e)})
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.post("/api/bridge/connect")
+async def bridge_connect(body: dict | None = None):
+    """Connect to bridge with the given or stored credentials.
+
+    Request body (optional -- uses stored credentials if omitted):
+        {"ip": "...", "username": "...", "clientkey": "...", "area_id": "1"}
+    """
+    global _bridge_ip, _bridge_username, _bridge_clientkey, _bridge_area_id
+
+    b = body or {}
+    ip = b.get("ip") or _bridge_ip
+    username = b.get("username") or _bridge_username
+    clientkey = b.get("clientkey") or _bridge_clientkey
+    area_id = b.get("area_id") or _bridge_area_id
+
+    if not ip or not username or not clientkey:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "Bridge IP, username and clientkey required"},
+        )
+
+    # Disconnect existing connection first
+    if entertainment_ctrl and entertainment_ctrl.is_connected:
+        _do_bridge_disconnect()
+
+    try:
+        await asyncio.get_event_loop().run_in_executor(
+            None, _do_bridge_connect, ip, username, clientkey, area_id
+        )
+        num_lights = entertainment_ctrl._num_lights if entertainment_ctrl else 0
+        return {
+            "connected": True,
+            "bridge_ip": ip,
+            "num_lights": num_lights,
+            "area_id": area_id,
+        }
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.post("/api/bridge/disconnect")
+async def bridge_disconnect():
+    """Disconnect from the bridge. Audio pipeline continues."""
+    _do_bridge_disconnect()
+    return {"connected": False}
+
+
+@app.post("/api/bridge/save")
+async def bridge_save():
+    """Save current bridge credentials to persistent storage."""
+    if not _bridge_ip or not _bridge_username or not _bridge_clientkey:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "No bridge credentials to save. Connect first."},
+        )
+    try:
+        save_bridge_config(
+            ip=_bridge_ip,
+            username=_bridge_username,
+            clientkey=_bridge_clientkey,
+            area_id=_bridge_area_id,
+        )
+        return {"saved": True}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.delete("/api/bridge/config")
+async def bridge_clear_config():
+    """Clear saved bridge credentials from persistent storage."""
+    try:
+        clear_bridge_config()
+        return {"cleared": True}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+# ---------------------------------------------------------------------------
+# Audio device endpoints
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/audio/devices")
+async def list_audio_devices():
+    """List available audio input devices."""
+    if not pipeline:
+        return JSONResponse(status_code=503, content={"error": "Audio pipeline not initialized"})
+    try:
+        devices = await asyncio.get_event_loop().run_in_executor(
+            None, pipeline.capture.list_devices
+        )
+        current = pipeline.capture.current_device_info
+        return {
+            "devices": devices,
+            "current_device_index": current["index"] if current else None,
+            "current_device_name": current["name"] if current else None,
+        }
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+# ---------------------------------------------------------------------------
+# WebSocket control message handler
+# ---------------------------------------------------------------------------
 
 
 def _handle_control(msg: dict):
@@ -659,6 +998,21 @@ def _handle_control(msg: dict):
         v = float(msg.get("value", 1.0))
         effect_engine.set_brightness_max(v)
         logger.info(f"Brightness max -> {v:.2f}")
+
+    elif t == "set_audio_device":
+        device_index = msg.get("value")
+        if device_index is not None:
+            device_index = int(device_index)
+        try:
+            info = pipeline.capture.switch_device(device_index)
+            pipeline.reset_analysis()
+            if device_index is not None:
+                save_audio_device_preference(device_index)
+            else:
+                clear_audio_device_preference()
+            logger.info(f"Audio device -> {info.get('name')} (index={device_index})")
+        except AudioCaptureError as e:
+            logger.error(f"Failed to switch audio device: {e}")
 
 
 def _apply_genre_preset(genre: str) -> None:
