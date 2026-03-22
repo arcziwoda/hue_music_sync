@@ -110,7 +110,6 @@ Download the latest `.exe` from [GitHub Releases](https://github.com/arcziwoda/h
 uv sync                                   # Install all dependencies
 uv run python -m hue_visualizer           # Run the app
 uv run pytest                             # Run tests
-uv run python scripts/test_audio.py       # Test audio pipeline (terminal)
 ```
 
 ## Tech Stack
