@@ -52,16 +52,9 @@ Open **http://localhost:8080** — you'll see the control panel with live audio 
 
 ### Connect to Hue Bridge
 
-1. Copy the example config:
-   ```bash
-   cp .env.example .env
-   ```
-2. Get your bridge credentials:
-   ```bash
-   uv run python scripts/setup_bridge.py
-   ```
-3. Fill in `.env` with `BRIDGE_IP`, `HUE_USERNAME`, `HUE_CLIENTKEY`, and `ENTERTAINMENT_AREA_ID`
-4. Restart the app — lights will sync automatically
+1. Click the **BRIDGE** button in the UI
+2. Follow the setup wizard — it discovers your bridge, pairs (press the link button), and lets you pick an entertainment area
+3. Credentials are saved automatically for next time
 
 ## Architecture
 
@@ -111,14 +104,6 @@ Windows requires **Python 3.12** — the `python-mbedtls` dependency (needed for
 
 Download the latest `.exe` from [GitHub Releases](https://github.com/arcziwoda/hue_music_sync/releases). Place your `.env` file next to the executable and run — it starts as a system tray icon and opens the browser automatically.
 
-### Building from Source
-
-```bash
-scripts\build_windows.bat
-```
-
-This installs `uv`, pins Python 3.12, syncs dependencies, and builds via PyInstaller to `dist\HueVisualizer\`.
-
 ## Development
 
 ```bash
@@ -126,7 +111,6 @@ uv sync                                   # Install all dependencies
 uv run python -m hue_visualizer           # Run the app
 uv run pytest                             # Run tests
 uv run python scripts/test_audio.py       # Test audio pipeline (terminal)
-uv run python scripts/test_entertainment.py  # Test Hue Entertainment API
 ```
 
 ## Tech Stack
