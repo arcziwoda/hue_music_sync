@@ -1378,6 +1378,8 @@ function connect() {
     $status.classList.add('connected');
     $status.querySelector('.status-text').textContent = 'CONNECTED';
     loadAudioDevices();
+    // Restore last session settings after brief delay for backend readiness
+    setTimeout(_restoreLastSession, 200);
   };
 
   ws.onmessage = function(e) {
@@ -1434,6 +1436,10 @@ function connect() {
 function send(type, value) {
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({ type: type, value: value }));
+  }
+  // Auto-save session on any setting change (not transient actions)
+  if (type.indexOf('set_') === 0) {
+    _autoSaveSession();
   }
 }
 
@@ -1988,6 +1994,7 @@ function initControls() {
       // Highlight the clicked algo button
       algoBtns.forEach(function(b) { b.classList.remove('active'); });
       btn.classList.add('active');
+      _autoSaveSession();
     });
   });
 
@@ -2080,6 +2087,32 @@ function initControls() {
 
 // --- Preset save/load (Task 2.18) ---
 var PRESET_KEY_PREFIX = 'hue_vis_preset_';
+var SESSION_KEY = 'hue_vis_last_session';
+var _autoSaveTimer = null;
+var _restoringSession = false;
+
+function _autoSaveSession() {
+  // Debounce: save 300ms after last change
+  if (_restoringSession) return;
+  clearTimeout(_autoSaveTimer);
+  _autoSaveTimer = setTimeout(function() {
+    localStorage.setItem(SESSION_KEY, JSON.stringify(_collectCurrentState()));
+  }, 300);
+}
+
+function _restoreLastSession() {
+  var raw = localStorage.getItem(SESSION_KEY);
+  if (!raw) return;
+  try {
+    var state = JSON.parse(raw);
+    _restoringSession = true;
+    _restoreState(state);
+    _restoringSession = false;
+  } catch (e) {
+    console.error('Failed to restore last session:', e);
+    _restoringSession = false;
+  }
+}
 
 function _collectCurrentState() {
   // Collect the current UI state from DOM (buttons + sliders)
