@@ -1,12 +1,14 @@
-"""Windows desktop launcher — system tray + browser auto-open.
+"""Desktop launcher — system tray / menu bar + browser auto-open.
 
-Entry point for the PyInstaller-packaged Windows .exe.
-Runs uvicorn in a background thread, opens the browser, and shows a system tray icon.
+Entry point for PyInstaller-packaged apps (Windows .exe, macOS .app).
+Runs uvicorn in a background thread, opens the browser, and shows a
+system tray icon (Windows) or menu bar icon (macOS).
 """
 
 import logging
 import multiprocessing
 import os
+import socket
 import sys
 import threading
 import webbrowser
@@ -18,10 +20,10 @@ from hue_visualizer.core.paths import get_env_path, get_base_dir
 
 
 def _fix_windowed_stdio():
-    """Redirect stdout/stderr to devnull when running as --windowed PyInstaller app.
+    """Redirect stdout/stderr to devnull when running as a windowed PyInstaller app.
 
-    PyInstaller with console=False sets sys.stdout/stderr to None,
-    which crashes logging.StreamHandler and any print() calls.
+    PyInstaller with console=False (Windows) or .app bundle (macOS) sets
+    sys.stdout/stderr to None, which crashes logging.StreamHandler and print().
     """
     if sys.stdout is None:
         sys.stdout = open(os.devnull, "w")
@@ -43,6 +45,37 @@ def _setup_logging():
         lg = logging.getLogger(name)
         lg.setLevel(logging.INFO)
         lg.addHandler(handler)
+
+
+def _find_available_port(host: str, preferred: int) -> int:
+    """Return *preferred* if free, otherwise ask the OS for any available port."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind((host, preferred))
+            return preferred
+    except OSError:
+        pass
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind((host, 0))
+        return s.getsockname()[1]
+
+
+def _init_macos_app():
+    """Initialize NSApplication for macOS .app bundles.
+
+    When launched as a .app bundle, macOS needs the NSApplication to be
+    explicitly set up with accessory policy before pystray can create
+    status bar items. Without this, the icon silently fails to appear.
+    """
+    if sys.platform != "darwin":
+        return
+    try:
+        from AppKit import NSApplication, NSApplicationActivationPolicyAccessory
+
+        app = NSApplication.sharedApplication()
+        app.setActivationPolicy_(NSApplicationActivationPolicyAccessory)
+    except ImportError:
+        pass
 
 
 def _create_tray_icon(url: str, server: uvicorn.Server):
@@ -97,12 +130,14 @@ def main():
 
     settings = Settings()
 
+    port = _find_available_port(settings.server_host, settings.server_port)
+
     from hue_visualizer.server.app import app
 
     config = uvicorn.Config(
         app,
         host=settings.server_host,
-        port=settings.server_port,
+        port=port,
         log_level="info",
     )
     server = uvicorn.Server(config)
@@ -111,12 +146,13 @@ def main():
     server_thread = threading.Thread(target=server.run, daemon=True)
     server_thread.start()
 
-    url = f"http://localhost:{settings.server_port}"
+    url = f"http://localhost:{port}"
 
     # Open browser after a short delay for server startup
     threading.Timer(1.5, lambda: webbrowser.open(url)).start()
 
     # System tray — blocks main thread until user quits
+    _init_macos_app()
     icon = _create_tray_icon(url, server)
     if icon:
         icon.run()

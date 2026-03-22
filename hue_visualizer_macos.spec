@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller spec for Hue Visualizer Windows desktop app.
+"""PyInstaller spec for Hue Visualizer macOS .app bundle.
 
-Build with: uv run pyinstaller hue_visualizer.spec --clean
+Build with: uv run pyinstaller hue_visualizer_macos.spec --clean
 """
 
 from PyInstaller.utils.hooks import collect_submodules
@@ -36,8 +36,8 @@ a = Analysis(
         "starlette.responses",
         "starlette.middleware",
         "multipart",
-        # pystray (platform-specific backend loaded dynamically)
-        "pystray._win32",
+        # pystray macOS backend (AppKit, loaded dynamically)
+        "pystray._darwin",
         # hue_visualizer modules
         "hue_visualizer",
         "hue_visualizer.server.app",
@@ -82,9 +82,9 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,  # UPX not commonly available on macOS
     console=False,
-    icon="assets/icon.ico",
+    icon="assets/icon.icns",
 )
 
 coll = COLLECT(
@@ -93,7 +93,31 @@ coll = COLLECT(
     a.zipfiles,
     a.datas,
     strip=False,
-    upx=True,
+    upx=False,
     upx_exclude=[],
     name="HueVisualizer",
+)
+
+app = BUNDLE(
+    coll,
+    name="HueVisualizer.app",
+    icon="assets/icon.icns",
+    bundle_identifier="com.arturkempinski.huevisualizer",
+    info_plist={
+        "CFBundleName": "Hue Visualizer",
+        "CFBundleDisplayName": "Hue Visualizer",
+        "CFBundleShortVersionString": "1.0.0",
+        "CFBundleVersion": "1.0.0",
+        # Menu bar only — no Dock icon
+        "LSUIElement": True,
+        # Microphone access (required by macOS for audio capture)
+        "NSMicrophoneUsageDescription": (
+            "Hue Visualizer needs microphone access to capture audio "
+            "for real-time music visualization on your Philips Hue lights."
+        ),
+        # High-DPI support
+        "NSHighResolutionCapable": True,
+        # Minimum macOS version (matches Python 3.11+ support)
+        "LSMinimumSystemVersion": "12.0",
+    },
 )
