@@ -1,9 +1,28 @@
 [project]
-name = "hue"
+name = "hue-music-sync"
 version = "0.1.0"
-description = "Add your description here"
+description = "Real-time music visualization for Philips Hue lights — FFT analysis, beat detection, and low-latency Entertainment API streaming"
 readme = "README.md"
+license = {text = "MIT"}
 requires-python = ">=3.11"
+authors = [
+    {name = "Artur Kempinski"},
+]
+keywords = ["philips-hue", "music-visualizer", "beat-detection", "fft", "entertainment-api", "smart-lights"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Multimedia :: Sound/Audio :: Analysis",
+]
+
+[project.urls]
+Homepage = "https://github.com/arcziwoda/hue_music_sync"
+Repository = "https://github.com/arcziwoda/hue_music_sync"
+Issues = "https://github.com/arcziwoda/hue_music_sync/issues"
 dependencies = [
     "fastapi>=0.135.1",
     "hue-entertainment-pykit>=0.9.3",

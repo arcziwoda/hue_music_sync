@@ -1,4 +1,4 @@
-# Python-generated files
+# Python
 __pycache__/
 *.py[oc]
 build/
@@ -12,8 +12,21 @@ wheels/
 # Environment variables (credentials)
 .env
 
-# Claude Code local settings (personal, not shared)
-.claude/settings.local.json
+# macOS
+.DS_Store
+
+# Testing
+.pytest_cache/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Claude Code (local-only)
+CLAUDE.md
+.claude/
 
 # Override global gitignore — keep PyInstaller spec in repo
 !*.spec
