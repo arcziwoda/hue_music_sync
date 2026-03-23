@@ -30,7 +30,14 @@ jobs:
           export LDFLAGS="-L$(brew --prefix mbedtls@2)/lib"
           uv sync
 
+      - name: Inject version from tag
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: echo "__version__ = \"${TAG_NAME}\"" > src/hue_visualizer/_version.py
+
       - name: Build .app with PyInstaller
+        env:
+          VSLZR_VERSION: ${{ github.ref_name }}
         run: uv run pyinstaller hue_visualizer_macos.spec --clean
 
       - name: Verify build output

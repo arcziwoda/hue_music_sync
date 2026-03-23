@@ -26,6 +26,12 @@ jobs:
       - name: Install dependencies
         run: uv sync --python ">=3.12,<3.13"
 
+      - name: Inject version from tag
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          Set-Content -Path "src\hue_visualizer\_version.py" -Value "__version__ = `"${env:TAG_NAME}`""
+
       - name: Build with PyInstaller
         run: uv run pyinstaller hue_visualizer.spec --clean
 

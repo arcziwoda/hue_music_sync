@@ -61,6 +61,7 @@ a = Analysis(
         "hue_visualizer.core.persistence",
         "hue_visualizer.core.paths",
         "hue_visualizer.core.exceptions",
+        "hue_visualizer.core.updater",
         "hue_visualizer.utils",
         "hue_visualizer.utils.color_conversion",
     ],

@@ -19,8 +19,8 @@ from ..bridge.discovery import (
 )
 from ..bridge.entertainment_controller import EntertainmentController
 from ..core.config import Settings
-from ..core.exceptions import BridgeDiscoveryError, BridgeConnectionError
-from ..core.exceptions import AudioCaptureError
+from ..core.exceptions import BridgeDiscoveryError, BridgeConnectionError, AudioCaptureError
+from ..core.updater import Updater, cleanup_old_updates
 from ..core.persistence import (
     load_bridge_config, save_bridge_config, clear_bridge_config,
     load_audio_device_preference, save_audio_device_preference, clear_audio_device_preference,
@@ -340,6 +340,17 @@ current_genre: str = "techno"
 current_palette: str = "neon"
 current_intensity: str = INTENSITY_NORMAL
 
+# Auto-updater
+updater: Updater | None = None
+_shutdown_callback = None
+
+
+def register_shutdown_callback(cb):
+    """Register a callback for update-triggered shutdown (called by desktop.py)."""
+    global _shutdown_callback
+    _shutdown_callback = cb
+
+
 # Bridge credentials currently in use (populated from .env or persistence or wizard)
 _bridge_ip: str | None = None
 _bridge_username: str | None = None
@@ -642,6 +653,13 @@ async def lifespan(app: FastAPI):
     # Task 0.6: Apply genre preset at startup so engine params match the preset
     _apply_genre_preset(current_genre)
 
+    # Auto-updater: clean up stale downloads, then check in background
+    global updater
+    cleanup_old_updates()
+    updater = Updater()
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(None, updater.check)
+
     task = asyncio.create_task(audio_loop())
     logger.info(f"Server ready -- open http://localhost:{settings.server_port}")
 
@@ -912,6 +930,69 @@ async def diagnostics():
         pass
 
     return info
+
+
+# ---------------------------------------------------------------------------
+# Auto-update endpoints
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/update/status")
+async def update_status():
+    """Return current update state, version info, and download progress."""
+    if not updater:
+        from hue_visualizer import __version__
+
+        return {"state": "idle", "current_version": __version__}
+    return updater.get_status()
+
+
+@app.post("/api/update/check")
+async def update_check():
+    """Trigger an update check against GitHub Releases."""
+    if not updater:
+        return JSONResponse(status_code=503, content={"error": "Updater not initialized"})
+    await asyncio.get_event_loop().run_in_executor(None, updater.check)
+    return updater.get_status()
+
+
+@app.post("/api/update/download")
+async def update_download():
+    """Start downloading the available update (runs in background)."""
+    if not updater:
+        return JSONResponse(status_code=503, content={"error": "Updater not initialized"})
+    if updater.state.value != "available":
+        return JSONResponse(status_code=400, content={"error": "No update available to download"})
+    asyncio.get_event_loop().run_in_executor(None, updater.download)
+    return updater.get_status()
+
+
+@app.post("/api/update/apply")
+async def update_apply():
+    """Apply downloaded update and restart the app."""
+    if not updater:
+        return JSONResponse(status_code=503, content={"error": "Updater not initialized"})
+    if updater.state.value != "ready":
+        return JSONResponse(status_code=400, content={"error": "No update ready to apply"})
+    if not updater.can_self_update():
+        return JSONResponse(status_code=400, content={"error": "Cannot self-update in this mode"})
+
+    try:
+        await asyncio.get_event_loop().run_in_executor(None, updater.apply)
+        # Trigger app shutdown — the new version is already launching
+        if _shutdown_callback:
+            _shutdown_callback()
+        return {"state": "applying"}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.post("/api/update/dismiss")
+async def update_dismiss():
+    """Dismiss the update notification."""
+    if updater:
+        updater.dismiss()
+    return {"state": "idle"}
 
 
 # ---------------------------------------------------------------------------

@@ -164,7 +164,7 @@ def main():
 
     port = _find_available_port(settings.server_host, settings.server_port)
 
-    from hue_visualizer.server.app import app
+    from hue_visualizer.server.app import app, register_shutdown_callback
 
     config = uvicorn.Config(
         app,
@@ -186,6 +186,15 @@ def main():
     # System tray — blocks main thread until user quits
     _init_macos_app()
     icon = _create_tray_icon(url, server)
+
+    # Register shutdown callback for auto-updater (same path as Quit)
+    def _shutdown_for_update():
+        server.should_exit = True
+        if icon:
+            icon.stop()
+
+    register_shutdown_callback(_shutdown_for_update)
+
     if icon:
         icon.run()
     else:

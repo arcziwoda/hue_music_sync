@@ -35,3 +35,9 @@ class ConfigurationError(HueVisualizerError):
     """Raised when configuration is invalid or missing."""
 
     pass
+
+
+class UpdateError(HueVisualizerError):
+    """Raised when auto-update operations fail."""
+
+    pass

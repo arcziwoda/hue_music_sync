@@ -991,6 +991,76 @@ body::after {
   opacity: 1;
   transform: translateY(0);
 }
+
+/* Auto-update banner */
+.update-banner {
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--accent);
+  padding: 7px 28px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+  position: relative;
+}
+
+.update-icon {
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.update-text {
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: var(--text-mid);
+  text-transform: uppercase;
+  flex: 1;
+}
+
+.update-btn {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0.15em;
+  color: var(--bg);
+  background: var(--accent);
+  border: none;
+  padding: 3px 10px;
+  cursor: pointer;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.update-btn:hover { opacity: 0.85; }
+.update-btn:disabled { opacity: 0.4; cursor: default; }
+
+.update-dismiss {
+  font-size: 14px;
+  color: var(--text-dim);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0 2px;
+  line-height: 1;
+}
+
+.update-dismiss:hover { color: var(--text); }
+
+.update-progress {
+  flex: 1;
+  height: 2px;
+  background: var(--border);
+  border-radius: 1px;
+  overflow: hidden;
+}
+
+.update-progress-bar {
+  height: 100%;
+  background: var(--accent);
+  width: 0%;
+  transition: width 0.3s ease;
+}
 </style>
 </head>
 <body>
@@ -1097,6 +1167,17 @@ body::after {
       </div>
     </div>
   </header>
+
+  <!-- Auto-update notification banner -->
+  <div class="update-banner" id="updateBanner" style="display:none">
+    <span class="update-icon">&#x2191;</span>
+    <span class="update-text" id="updateText"></span>
+    <div class="update-progress" id="updateProgress" style="display:none">
+      <div class="update-progress-bar" id="updateProgressBar"></div>
+    </div>
+    <button class="update-btn" id="updateBtn" style="display:none"></button>
+    <button class="update-dismiss" id="updateDismiss">&times;</button>
+  </div>
 
   <section class="spectrum-section">
     <span class="section-label">SPECTRUM</span>
@@ -2690,11 +2771,137 @@ function initHints() {
 }
 
 // Init
+// ---------------------------------------------------------------------------
+// Auto-update
+// ---------------------------------------------------------------------------
+
+var _updatePollTimer = null;
+var $updateBanner = null;
+var $updateText = null;
+var $updateBtn = null;
+var $updateProgress = null;
+var $updateProgressBar = null;
+var $updateDismiss = null;
+
+function initUpdater() {
+  $updateBanner = document.getElementById('updateBanner');
+  $updateText = document.getElementById('updateText');
+  $updateBtn = document.getElementById('updateBtn');
+  $updateProgress = document.getElementById('updateProgress');
+  $updateProgressBar = document.getElementById('updateProgressBar');
+  $updateDismiss = document.getElementById('updateDismiss');
+
+  $updateDismiss.addEventListener('click', function() {
+    fetch('/api/update/dismiss', { method: 'POST' });
+    $updateBanner.style.display = 'none';
+  });
+
+  $updateBtn.addEventListener('click', function() {
+    var action = $updateBtn.dataset.action;
+    if (action === 'download') {
+      fetch('/api/update/download', { method: 'POST' })
+        .then(function(r) { return r.json(); })
+        .then(function(d) { renderUpdateBanner(d); startUpdatePolling(); });
+    } else if (action === 'install') {
+      fetch('/api/update/apply', { method: 'POST' })
+        .then(function(r) { return r.json(); })
+        .then(renderUpdateBanner);
+    } else if (action === 'release') {
+      window.open($updateBtn.dataset.url, '_blank');
+    } else if (action === 'retry') {
+      fetch('/api/update/check', { method: 'POST' })
+        .then(function(r) { return r.json(); })
+        .then(renderUpdateBanner);
+    }
+  });
+
+  // Check on page load (slight delay to let server finish its own check)
+  setTimeout(function() {
+    fetch('/api/update/status')
+      .then(function(r) { return r.json(); })
+      .then(renderUpdateBanner)
+      .catch(function() {});
+  }, 3000);
+}
+
+function renderUpdateBanner(data) {
+  if (!$updateBanner) return;
+  var state = data.state;
+  var ver = data.latest_version || '';
+
+  // States that hide the banner
+  if (state === 'idle' || state === 'up_to_date' || state === 'checking') {
+    $updateBanner.style.display = 'none';
+    return;
+  }
+
+  $updateBanner.style.display = 'flex';
+  $updateProgress.style.display = 'none';
+  $updateBtn.style.display = 'inline-block';
+  $updateBtn.disabled = false;
+
+  if (state === 'available') {
+    $updateText.textContent = 'Update ' + ver + ' available';
+    if (data.can_install) {
+      $updateBtn.textContent = 'DOWNLOAD';
+      $updateBtn.dataset.action = 'download';
+    } else {
+      $updateBtn.textContent = 'VIEW RELEASE';
+      $updateBtn.dataset.action = 'release';
+      $updateBtn.dataset.url = data.release_url || '';
+    }
+  } else if (state === 'downloading') {
+    var pct = 0;
+    if (data.progress_total > 0) {
+      pct = Math.round((data.progress_downloaded / data.progress_total) * 100);
+    }
+    $updateText.textContent = 'Downloading ' + ver + '... ' + pct + '%';
+    $updateBtn.style.display = 'none';
+    $updateProgress.style.display = 'block';
+    $updateProgressBar.style.width = pct + '%';
+  } else if (state === 'ready') {
+    $updateText.textContent = ver + ' ready to install';
+    if (data.can_install) {
+      $updateBtn.textContent = 'INSTALL & RESTART';
+      $updateBtn.dataset.action = 'install';
+    } else {
+      $updateBtn.textContent = 'VIEW RELEASE';
+      $updateBtn.dataset.action = 'release';
+      $updateBtn.dataset.url = data.release_url || '';
+    }
+  } else if (state === 'applying') {
+    $updateText.textContent = 'Installing... app will restart';
+    $updateBtn.style.display = 'none';
+    $updateDismiss.style.display = 'none';
+  } else if (state === 'error') {
+    $updateText.textContent = 'Update failed: ' + (data.error || 'unknown error');
+    $updateBtn.textContent = 'RETRY';
+    $updateBtn.dataset.action = 'retry';
+  }
+}
+
+function startUpdatePolling() {
+  if (_updatePollTimer) return;
+  _updatePollTimer = setInterval(function() {
+    fetch('/api/update/status')
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        renderUpdateBanner(data);
+        if (data.state !== 'downloading') {
+          clearInterval(_updatePollTimer);
+          _updatePollTimer = null;
+        }
+      })
+      .catch(function() {});
+  }, 1000);
+}
+
 function init() {
   initCanvases();
   initControls();
   initBridgeWizard();
   initHints();
+  initUpdater();
   connect();
   requestAnimationFrame(tick);
 }

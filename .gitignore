@@ -24,6 +24,9 @@ wheels/
 *.swp
 *.swo
 
+# CI-generated version file (frozen builds)
+src/hue_visualizer/_version.py
+
 # Claude Code (local-only)
 CLAUDE.md
 .claude/

@@ -4,7 +4,12 @@
 Build with: uv run pyinstaller hue_visualizer_macos.spec --clean
 """
 
+import os
+
 from PyInstaller.utils.hooks import collect_submodules
+
+# Version from CI env var (set by build-macos.yml), fallback for local builds
+_version = os.environ.get("VSLZR_VERSION", "0.0.0").lstrip("v")
 
 # python-mbedtls is a Cython package — PyInstaller can't auto-detect its submodules
 mbedtls_hidden = collect_submodules("mbedtls")
@@ -61,6 +66,7 @@ a = Analysis(
         "hue_visualizer.core.persistence",
         "hue_visualizer.core.paths",
         "hue_visualizer.core.exceptions",
+        "hue_visualizer.core.updater",
         "hue_visualizer.utils",
         "hue_visualizer.utils.color_conversion",
     ],
@@ -106,8 +112,8 @@ app = BUNDLE(
     info_plist={
         "CFBundleName": "VSLZR",
         "CFBundleDisplayName": "VSLZR",
-        "CFBundleShortVersionString": "1.0.0",
-        "CFBundleVersion": "1.0.0",
+        "CFBundleShortVersionString": _version,
+        "CFBundleVersion": _version,
         # Menu bar only — no Dock icon
         "LSUIElement": True,
         # Microphone access (required by macOS for audio capture)
