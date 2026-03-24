@@ -992,16 +992,19 @@ body::after {
   transform: translateY(0);
 }
 
-/* Auto-update banner */
+/* Auto-update banner — overlays spectrum, no layout shift */
 .update-banner {
-  background: var(--bg-elevated);
+  background: rgba(12, 12, 12, 0.92);
   border-bottom: 1px solid var(--accent);
   padding: 7px 28px;
   display: flex;
   align-items: center;
   gap: 10px;
-  flex-shrink: 0;
-  position: relative;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 20;
 }
 
 .update-icon {
@@ -1168,18 +1171,17 @@ body::after {
     </div>
   </header>
 
-  <!-- Auto-update notification banner -->
-  <div class="update-banner" id="updateBanner" style="display:none">
-    <span class="update-icon">&#x2191;</span>
-    <span class="update-text" id="updateText"></span>
-    <div class="update-progress" id="updateProgress" style="display:none">
-      <div class="update-progress-bar" id="updateProgressBar"></div>
-    </div>
-    <button class="update-btn" id="updateBtn" style="display:none"></button>
-    <button class="update-dismiss" id="updateDismiss">&times;</button>
-  </div>
-
   <section class="spectrum-section">
+    <!-- Auto-update notification banner (overlay, no layout shift) -->
+    <div class="update-banner" id="updateBanner" style="display:none">
+      <span class="update-icon">&#x2191;</span>
+      <span class="update-text" id="updateText"></span>
+      <div class="update-progress" id="updateProgress" style="display:none">
+        <div class="update-progress-bar" id="updateProgressBar"></div>
+      </div>
+      <button class="update-btn" id="updateBtn" style="display:none"></button>
+      <button class="update-dismiss" id="updateDismiss">&times;</button>
+    </div>
     <span class="section-label">SPECTRUM</span>
     <div class="corner-mark tl"></div>
     <div class="corner-mark tr"></div>
