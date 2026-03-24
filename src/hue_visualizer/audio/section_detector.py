@@ -82,7 +82,7 @@ class SectionDetector:
         # --- Patin C variance-adaptive threshold ---
         self._patin_c_max: float = 1.55
         self._patin_c_min: float = 1.0
-        self._base_threshold: float = 0.40
+        self._base_threshold: float = 0.30
 
         # --- Drop entry conditions ---
         self._emergency_override: float = 0.90
@@ -96,7 +96,7 @@ class SectionDetector:
         # --- Cold start ---
         self._cold_start_lockout: int = 86  # ~2s
         self._full_warmup: int = 344  # ~8s
-        self._warmup_threshold_mult: float = 1.3
+        self._warmup_threshold_mult: float = 2.0
 
         # --- Song change ---
         self._song_change_cosine_thresh: float = 0.6
@@ -401,11 +401,12 @@ class SectionDetector:
     ) -> float:
         """Compute composite drop score from six normalized signals."""
         # Individual signals, each clipped to [0, 1]
-        bass_signal = _clip01((bass_ex - 1.0) / 2.0)
-        energy_signal = _clip01((rms_ex - 1.0) / 1.5)
-        centroid_signal = _clip01((1.0 - centroid_ratio) / 0.3)
+        # Denominators calibrated for real-world exertion ratios (1.3-2.0×)
+        bass_signal = _clip01((bass_ex - 1.0) / 1.0)
+        energy_signal = _clip01((rms_ex - 1.0) / 0.75)
+        centroid_signal = _clip01((1.0 - centroid_ratio) / 0.15)
         flux_signal = _clip01(
-            (flux / max(self._ema_long_flux, 1e-6) - 2.0) / 3.0
+            (flux / max(self._ema_long_flux, 1e-6) - 1.5) / 2.0
         )
         flatness_signal = _clip01(1.0 - flatness * 5.0)
 
@@ -508,11 +509,19 @@ class SectionDetector:
         ):
             return Section.DROP
 
-        # Normal DROP entry (not from DROP or SUSTAIN)
+        # Normal DROP entry from BREAKDOWN or BUILDUP (standard threshold)
         if (
-            state not in (Section.DROP, Section.SUSTAIN, Section.UNKNOWN)
+            state in (Section.BREAKDOWN, Section.BUILDUP)
             and drop_score > threshold
             and bass_ex > self._bass_exertion_min
+        ):
+            return Section.DROP
+
+        # DROP entry from NORMAL (elevated threshold + stronger bass evidence)
+        if (
+            state == Section.NORMAL
+            and drop_score > threshold * 1.3
+            and bass_ex > 2.5  # Higher bar without breakdown context
         ):
             return Section.DROP
 
@@ -545,8 +554,8 @@ class SectionDetector:
                 return Section.BREAKDOWN
             if drop_score < threshold * 0.5:
                 return Section.NORMAL
-            # Re-trigger DROP on new spike from SUSTAIN
-            if drop_score > threshold and bass_ex > self._bass_exertion_min:
+            # Re-trigger DROP on new spike from SUSTAIN (elevated threshold)
+            if drop_score > threshold * 1.5 and bass_ex > self._bass_exertion_min:
                 return Section.DROP
             return Section.SUSTAIN
 
