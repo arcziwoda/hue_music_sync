@@ -333,23 +333,31 @@ class Updater:
 
             exe_path = app_path / "VSLZR.exe"
             bat_path = _updates_dir() / "update.bat"
+            log_path = _updates_dir() / "update.log"
 
+            # ping -n N waits N-1 seconds (no console required, unlike timeout)
+            # taskkill ensures the old process is fully dead before xcopy
             bat_content = (
                 '@echo off\n'
-                'echo Updating VSLZR...\n'
-                'timeout /t 2 /nobreak >nul\n'
-                f'xcopy /s /y /q "{extracted}\\*" "{app_path}\\"\n'
+                f'echo Updating VSLZR... > "{log_path}"\n'
+                'ping -n 4 127.0.0.1 >nul\n'
+                f'taskkill /f /im VSLZR.exe >nul 2>&1\n'
+                'ping -n 2 127.0.0.1 >nul\n'
+                f'xcopy /s /y /q "{extracted}\\*" "{app_path}\\" >> "{log_path}" 2>&1\n'
+                f'if errorlevel 1 (echo XCOPY FAILED >> "{log_path}") '
+                f'else (echo XCOPY OK >> "{log_path}")\n'
                 f'start "" "{exe_path}"\n'
                 f'rd /s /q "{staging}"\n'
                 'del "%~f0"\n'
             )
             bat_path.write_text(bat_content)
 
-            # Launch batch script detached
+            # CREATE_NO_WINDOW: hidden console (batch commands work)
+            # CREATE_NEW_PROCESS_GROUP: survives parent exit
+            CREATE_NO_WINDOW = 0x08000000
             subprocess.Popen(
                 ["cmd", "/c", str(bat_path)],
-                creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
-                close_fds=True,
+                creationflags=CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP,
             )
 
             logger.info(f"Update batch script launched: {bat_path}")
