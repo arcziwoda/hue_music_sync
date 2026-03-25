@@ -666,8 +666,79 @@ body::after {
 .corner-mark.bl { bottom: 6px; left: 6px; border-width: 0 0 1px 1px; }
 .corner-mark.br { bottom: 6px; right: 6px; border-width: 0 1px 1px 0; }
 
-/* Bridge setup wizard */
-.bridge-btn {
+/* Bridge controls in header */
+.bridge-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: opacity 0.2s;
+}
+
+.bridge-status-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.bridge-status-dot {
+  width: 6px;
+  height: 6px;
+  background: var(--text-dim);
+  flex-shrink: 0;
+  transition: background 0.3s;
+}
+
+.bridge-status-dot.connected {
+  background: var(--accent);
+  box-shadow: 0 0 6px rgba(0, 255, 204, 0.4);
+}
+
+.bridge-status-dot.saved {
+  background: #d4a017;
+}
+
+.bridge-status-ip {
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.bridge-status-dot.connected + .bridge-status-ip {
+  color: var(--text-mid);
+}
+
+.bridge-area-select {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 9px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text-mid);
+  padding: 3px 6px;
+  max-width: 160px;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+  text-overflow: ellipsis;
+  transition: border-color 0.15s;
+}
+
+.bridge-area-select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.bridge-area-select:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.bridge-area-select option {
+  background: var(--bg);
+  color: var(--text-mid);
+}
+
+.bridge-ctrl-btn {
   font-family: 'IBM Plex Mono', monospace;
   font-size: 9px;
   font-weight: 500;
@@ -683,14 +754,46 @@ body::after {
   user-select: none;
 }
 
-.bridge-btn:hover {
+.bridge-ctrl-btn:hover:not(:disabled) {
   border-color: var(--text-mid);
   color: var(--text-mid);
 }
 
-.bridge-btn.connected {
+.bridge-ctrl-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.bridge-ctrl-btn.accent {
   border-color: var(--accent);
   color: var(--accent);
+}
+
+.bridge-ctrl-btn.accent:hover:not(:disabled) {
+  background: var(--accent-dim);
+}
+
+.bridge-ctrl-btn.connecting {
+  border-color: var(--accent);
+  color: var(--accent);
+  pointer-events: none;
+}
+
+.bridge-ctrl-btn.disconnect {
+  border-color: var(--border);
+  color: var(--text-dim);
+}
+
+.bridge-ctrl-btn.disconnect:hover {
+  border-color: #ff4444;
+  color: #ff4444;
+}
+
+.bridge-sep {
+  width: 1px;
+  height: 16px;
+  background: var(--border);
+  flex-shrink: 0;
 }
 
 /* Modal overlay */
@@ -1191,7 +1294,19 @@ body::after {
         <button class="device-refresh" id="btnRefreshDevices" title="Refresh device list">&#8635;</button>
         <span class="audio-error" id="audioError" style="display:none"></span>
       </div>
-      <button class="bridge-btn" id="btnBridge" title="Bridge setup">BRIDGE</button>
+      <div class="bridge-controls" id="bridgeControls">
+        <div class="bridge-status-indicator">
+          <span class="bridge-status-dot" id="bridgeDot"></span>
+          <span class="bridge-status-ip" id="bridgeIpLabel"></span>
+        </div>
+        <select class="bridge-area-select" id="bridgeAreaSelect" disabled style="display:none">
+          <option value="">---</option>
+        </select>
+        <button class="bridge-ctrl-btn accent" id="btnBridgeConnect" style="display:none">CONNECT</button>
+        <button class="bridge-ctrl-btn disconnect" id="btnBridgeDisconnect" style="display:none">DISCONNECT</button>
+        <span class="bridge-sep"></span>
+        <button class="bridge-ctrl-btn" id="btnBridgePair" title="Pair with a new bridge">PAIR NEW</button>
+      </div>
       <button class="update-check-btn" id="btnCheckUpdate" title="Check for updates">&#8635;</button>
       <div class="status" id="status">
         <span class="status-dot"></span>
@@ -1458,6 +1573,29 @@ var $lightStatus = document.getElementById('lightStatus');
 
 var specCtx, bandCtx;
 var specW, specH, bandW, bandH;
+
+// Precompute center frequency for each spectrum bin
+// Replicates backend: np.unique(np.logspace(0, log10(n_fft), 65, dtype=int))
+var SPEC_BIN_FREQS = (function() {
+  var nFft = 1024; // half of FFT_SIZE=2048
+  var nBins = 64;
+  var hzPerBin = 44100 / 2048;
+  var logMax = Math.log10(nFft);
+  var raw = [];
+  for (var i = 0; i <= nBins; i++) {
+    raw.push(Math.min(Math.floor(Math.pow(10, (i / nBins) * logMax)), nFft - 1));
+  }
+  var edges = [raw[0]];
+  for (var i = 1; i < raw.length; i++) {
+    if (raw[i] !== edges[edges.length - 1]) edges.push(raw[i]);
+  }
+  var freqs = [];
+  for (var i = 0; i < edges.length - 1; i++) {
+    freqs.push((edges[i] + edges[i + 1]) / 2 * hzPerBin);
+  }
+  while (freqs.length < nBins) freqs.push(0);
+  return freqs;
+})();
 
 // Canvas setup with DPI scaling
 function setupCanvas(canvas) {
@@ -1748,7 +1886,10 @@ function drawSpectrum() {
   ctx.clearRect(0, 0, w, h);
 
   var data = S.sSpectrum;
-  var n = data.length;
+  // Only show bins with actual frequency data (skip zero-padded tail)
+  var n = SPEC_BIN_FREQS.length;
+  while (n > 1 && SPEC_BIN_FREQS[n - 1] === 0) n--;
+  n = Math.min(n + 2, data.length); // small margin past last real bin
   var pad = 28;
   var dw = w - pad * 2;
 
@@ -1820,6 +1961,31 @@ function drawSpectrum() {
   }
   ctx.stroke();
   ctx.restore();
+
+  // Frequency tick marks using precomputed bin frequencies
+  var freqTicks = [100, 500, 1000, 2000, 5000, 10000, 20000];
+  var freqLabels = ['100', '500', '1k', '2k', '5k', '10k', '20k'];
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+  ctx.lineWidth = 1;
+  ctx.font = '9px IBM Plex Mono';
+  ctx.textAlign = 'center';
+  for (var t = 0; t < freqTicks.length; t++) {
+    // Find bin closest to target frequency
+    var target = freqTicks[t];
+    var bestBin = -1, bestDist = Infinity;
+    for (var bi = 0; bi < n; bi++) {
+      var d = Math.abs(SPEC_BIN_FREQS[bi] - target);
+      if (d < bestDist) { bestDist = d; bestBin = bi; }
+    }
+    if (bestBin < 0 || SPEC_BIN_FREQS[bestBin] === 0) continue;
+    var tx = pad + (bestBin / (n - 1)) * dw;
+    ctx.beginPath();
+    ctx.moveTo(tx, h - 4);
+    ctx.lineTo(tx, h);
+    ctx.stroke();
+    ctx.fillText(freqLabels[t], tx, h - 6);
+  }
 }
 
 // Drawing: 7 frequency band bars
@@ -1890,10 +2056,6 @@ function drawBands() {
     ctx.textAlign = 'center';
     ctx.fillText(BAND_LABELS[i], x + barW / 2, marginTop + drawH + 16);
 
-    // Energy value
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
-    ctx.font = '300 8px "IBM Plex Mono", monospace';
-    ctx.fillText(energy.toFixed(2), x + barW / 2, marginTop + drawH + 26);
   }
 }
 
@@ -2436,7 +2598,7 @@ function initPresets() {
   _updatePresetButtonStates();
 }
 
-// --- Bridge Setup Wizard ---
+// --- Bridge Setup Wizard + Header Controls ---
 var _wizState = {
   bridgeIp: null,
   username: null,
@@ -2446,73 +2608,272 @@ var _wizState = {
   areas: {}
 };
 
+// Track last known state to avoid redundant DOM updates from 30 Hz WS
+var _bridgeUIState = { connected: false, hasSaved: false, ip: null, areaId: null };
+
 function initBridgeWizard() {
   var $modal = document.getElementById('bridgeModal');
-  var $btnBridge = document.getElementById('btnBridge');
   var $close = document.getElementById('bridgeModalClose');
 
-  $btnBridge.addEventListener('click', function() {
+  // PAIR NEW button opens wizard
+  document.getElementById('btnBridgePair').addEventListener('click', function() {
     $modal.classList.add('visible');
-    _wizRefreshStatus();
+    _wizRefreshModalStatus();
   });
 
   $close.addEventListener('click', function() {
     $modal.classList.remove('visible');
   });
 
-  // Close on overlay click (but not modal body click)
   $modal.addEventListener('click', function(e) {
     if (e.target === $modal) $modal.classList.remove('visible');
   });
 
-  // Step 1: Discover
+  // Wizard step buttons
   document.getElementById('wizDiscover').addEventListener('click', _wizDoDiscover);
-
-  // Step 2: Pair
   document.getElementById('wizPair').addEventListener('click', _wizDoPair);
-
-  // Step 3: Areas
   document.getElementById('wizRefreshAreas').addEventListener('click', _wizDoRefreshAreas);
-
-  // Step 4: Connect / Disconnect
   document.getElementById('wizConnect').addEventListener('click', _wizDoConnect);
   document.getElementById('wizDisconnect').addEventListener('click', _wizDoDisconnect);
-
-  // Step 5: Save / Forget
   document.getElementById('wizSave').addEventListener('click', _wizDoSave);
   document.getElementById('wizForget').addEventListener('click', _wizDoForget);
 
-  // Initial status check
-  _wizRefreshStatus();
+  // Header: quick connect (saved config)
+  document.getElementById('btnBridgeConnect').addEventListener('click', _bridgeQuickConnect);
+
+  // Header: disconnect
+  document.getElementById('btnBridgeDisconnect').addEventListener('click', _bridgeDisconnect);
+
+  // Header: area dropdown change
+  document.getElementById('bridgeAreaSelect').addEventListener('change', _bridgeAreaChange);
+
+  // Initial status
+  _bridgeRefreshAll();
 }
 
-function _wizRefreshStatus() {
+// --- Header bridge controls state management ---
+
+var _bridgeRefreshInFlight = false;
+var _bridgeRefreshQueued = false;
+
+function _bridgeRefreshAll() {
+  // Prevent concurrent requests — queue at most one follow-up
+  if (_bridgeRefreshInFlight) {
+    _bridgeRefreshQueued = true;
+    return;
+  }
+  _bridgeRefreshInFlight = true;
+
+  fetch('/api/bridge/status')
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      _wizState.connected = d.connected;
+      _wizState.areas = d.areas || {};
+      if (d.connected) {
+        _wizState.bridgeIp = d.bridge_ip;
+        _wizState.areaId = d.area_id;
+      } else if (d.has_saved_config) {
+        _wizState.bridgeIp = d.saved_bridge_ip;
+        _wizState.areaId = d.saved_area_id;
+      }
+      _bridgeUpdateHeader(d);
+    })
+    .catch(function() {})
+    .finally(function() {
+      _bridgeRefreshInFlight = false;
+      if (_bridgeRefreshQueued) {
+        _bridgeRefreshQueued = false;
+        _bridgeRefreshAll();
+      }
+    });
+}
+
+// Guard: suppress change handler during programmatic dropdown updates
+var _areaSelectProgrammatic = false;
+
+function _bridgeUpdateHeader(d) {
+  var $dot = document.getElementById('bridgeDot');
+  var $ip = document.getElementById('bridgeIpLabel');
+  var $areaSelect = document.getElementById('bridgeAreaSelect');
+  var $btnConnect = document.getElementById('btnBridgeConnect');
+  var $btnDisconnect = document.getElementById('btnBridgeDisconnect');
+
+  if (d.connected) {
+    // Connected state
+    $dot.className = 'bridge-status-dot connected';
+    $ip.textContent = (d.bridge_ip || 'BRIDGE') + ' / ' + (d.num_lights || 0) + 'L';
+    $btnConnect.style.display = 'none';
+    $btnDisconnect.style.display = '';
+
+    // Populate area dropdown
+    var areas = d.areas || _wizState.areas || {};
+    var keys = Object.keys(areas);
+    if (keys.length > 0) {
+      // Only rebuild if areas changed
+      var currentOpts = $areaSelect.options.length;
+      var needsRebuild = currentOpts !== keys.length;
+      if (!needsRebuild) {
+        for (var i = 0; i < keys.length; i++) {
+          if (!$areaSelect.querySelector('option[value="' + keys[i] + '"]')) {
+            needsRebuild = true;
+            break;
+          }
+        }
+      }
+      if (needsRebuild) {
+        _areaSelectProgrammatic = true;
+        while ($areaSelect.firstChild) $areaSelect.removeChild($areaSelect.firstChild);
+        for (var j = 0; j < keys.length; j++) {
+          var id = keys[j];
+          var area = areas[id];
+          var opt = document.createElement('option');
+          opt.value = id;
+          opt.textContent = area.name + ' (' + area.num_lights + 'L)';
+          $areaSelect.appendChild(opt);
+        }
+        _areaSelectProgrammatic = false;
+      }
+      _areaSelectProgrammatic = true;
+      $areaSelect.value = d.area_id || _wizState.areaId || keys[0];
+      _areaSelectProgrammatic = false;
+      $areaSelect.disabled = false;
+      $areaSelect.style.display = '';
+    } else {
+      $areaSelect.style.display = 'none';
+    }
+  } else if (d.has_saved_config) {
+    // Saved but not connected
+    $dot.className = 'bridge-status-dot saved';
+    $ip.textContent = d.saved_bridge_ip || 'SAVED';
+    $btnConnect.style.display = '';
+    $btnConnect.textContent = 'CONNECT';
+    $btnConnect.disabled = false;
+    $btnConnect.className = 'bridge-ctrl-btn accent';
+    $btnDisconnect.style.display = 'none';
+    $areaSelect.style.display = 'none';
+  } else {
+    // No config at all
+    $dot.className = 'bridge-status-dot';
+    $ip.textContent = 'NO BRIDGE';
+    $btnConnect.style.display = 'none';
+    $btnDisconnect.style.display = 'none';
+    $areaSelect.style.display = 'none';
+  }
+
+  _bridgeUIState.connected = d.connected;
+  _bridgeUIState.hasSaved = d.has_saved_config;
+  _bridgeUIState.ip = d.bridge_ip || d.saved_bridge_ip;
+  _bridgeUIState.areaId = d.area_id;
+}
+
+async function _bridgeQuickConnect() {
+  var $btn = document.getElementById('btnBridgeConnect');
+  $btn.disabled = true;
+  $btn.textContent = 'CONNECTING...';
+  $btn.className = 'bridge-ctrl-btn connecting';
+
+  try {
+    var resp = await fetch('/api/bridge/connect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({})
+    });
+    var data = await resp.json();
+    if (resp.ok && data.connected) {
+      _wizState.connected = true;
+      _wizState.areaId = data.area_id;
+      _bridgeRefreshAll();
+    } else {
+      $btn.textContent = 'FAILED';
+      $btn.className = 'bridge-ctrl-btn';
+      setTimeout(function() {
+        $btn.textContent = 'CONNECT';
+        $btn.className = 'bridge-ctrl-btn accent';
+        $btn.disabled = false;
+      }, 2000);
+    }
+  } catch (e) {
+    $btn.textContent = 'ERROR';
+    $btn.className = 'bridge-ctrl-btn';
+    setTimeout(function() {
+      $btn.textContent = 'CONNECT';
+      $btn.className = 'bridge-ctrl-btn accent';
+      $btn.disabled = false;
+    }, 2000);
+  }
+}
+
+async function _bridgeDisconnect() {
+  var $btn = document.getElementById('btnBridgeDisconnect');
+  $btn.disabled = true;
+  try {
+    await fetch('/api/bridge/disconnect', { method: 'POST' });
+    _wizState.connected = false;
+    _bridgeRefreshAll();
+  } catch (e) {
+    $btn.disabled = false;
+  }
+}
+
+async function _bridgeAreaChange() {
+  if (_areaSelectProgrammatic) return;
+  var $select = document.getElementById('bridgeAreaSelect');
+  var newAreaId = $select.value;
+  if (!newAreaId || newAreaId === _wizState.areaId) return;
+
+  $select.disabled = true;
+  var $ip = document.getElementById('bridgeIpLabel');
+  var prevText = $ip.textContent;
+  $ip.textContent = 'SWITCHING AREA...';
+
+  try {
+    var resp = await fetch('/api/bridge/connect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ area_id: newAreaId })
+    });
+    var data = await resp.json();
+    if (resp.ok && data.connected) {
+      _wizState.areaId = data.area_id;
+      _bridgeRefreshAll();
+      // Auto-save the area change
+      fetch('/api/bridge/save', { method: 'POST' }).catch(function() {});
+    } else {
+      // Revert selection
+      $select.value = _wizState.areaId;
+      $ip.textContent = prevText;
+      $select.disabled = false;
+    }
+  } catch (e) {
+    $select.value = _wizState.areaId;
+    $ip.textContent = prevText;
+    $select.disabled = false;
+  }
+}
+
+// --- Wizard modal status (only updates modal internals) ---
+
+function _wizRefreshModalStatus() {
   fetch('/api/bridge/status')
     .then(function(r) { return r.json(); })
     .then(function(d) {
       _wizState.connected = d.connected;
       var $status = document.getElementById('wizStatus');
       var $text = document.getElementById('wizStatusText');
-      var $btnBridge = document.getElementById('btnBridge');
 
       if (d.connected) {
         $status.classList.add('connected');
         $status.classList.remove('saved');
         $text.textContent = 'CONNECTED  ' + (d.bridge_ip || '') + '  (' + d.num_lights + ' lights)';
-        $btnBridge.classList.add('connected');
-        $btnBridge.textContent = 'BRIDGE: ' + (d.bridge_ip || 'ON');
         _wizState.bridgeIp = d.bridge_ip;
         _wizState.areaId = d.area_id;
         document.getElementById('wizDisconnect').disabled = false;
         document.getElementById('wizSave').disabled = false;
         document.getElementById('wizConnect').disabled = true;
       } else if (d.has_saved_config) {
-        // Saved config exists but not connected — show saved info, enable CONNECT
         $status.classList.remove('connected');
         $status.classList.add('saved');
-        $text.textContent = 'SAVED  ' + (d.saved_bridge_ip || '???') + (d.saved_area_id ? '  (area ' + d.saved_area_id + ')' : '') + '  — click CONNECT';
-        $btnBridge.classList.remove('connected');
-        $btnBridge.textContent = 'BRIDGE: ' + (d.saved_bridge_ip || 'SAVED');
+        $text.textContent = 'SAVED  ' + (d.saved_bridge_ip || '???') + (d.saved_area_id ? '  (area ' + d.saved_area_id + ')' : '') + '  — use CONNECT in header or pair new';
         _wizState.bridgeIp = d.saved_bridge_ip;
         _wizState.areaId = d.saved_area_id;
         document.getElementById('wizConnect').disabled = false;
@@ -2526,8 +2887,6 @@ function _wizRefreshStatus() {
         $status.classList.remove('connected');
         $status.classList.remove('saved');
         $text.textContent = 'NOT CONNECTED';
-        $btnBridge.classList.remove('connected');
-        $btnBridge.textContent = 'BRIDGE';
         document.getElementById('wizConnect').disabled = true;
         document.getElementById('wizDisconnect').disabled = true;
       }
@@ -2709,7 +3068,8 @@ async function _wizDoConnect() {
     if (resp.ok && data.connected) {
       _wizSetMsg('wizConnectMsg', 'Connected! ' + data.num_lights + ' lights streaming.', 'success');
       document.getElementById('wizSave').disabled = false;
-      _wizRefreshStatus();
+      _wizRefreshModalStatus();
+      _bridgeRefreshAll();
     } else {
       _wizSetMsg('wizConnectMsg', data.error || 'Connection failed.', 'error');
     }
@@ -2725,7 +3085,8 @@ async function _wizDoDisconnect() {
   try {
     await fetch('/api/bridge/disconnect', { method: 'POST' });
     _wizSetMsg('wizConnectMsg', 'Disconnected.', '');
-    _wizRefreshStatus();
+    _wizRefreshModalStatus();
+    _bridgeRefreshAll();
   } catch (e) {
     _wizSetMsg('wizConnectMsg', 'Error: ' + e.message, 'error');
   }
@@ -2737,7 +3098,8 @@ async function _wizDoSave() {
     var resp = await fetch('/api/bridge/save', { method: 'POST' });
     var data = await resp.json();
     if (resp.ok) {
-      _wizSetMsg('wizSaveMsg', 'Config saved. Bridge will auto-connect on next start.', 'success');
+      _wizSetMsg('wizSaveMsg', 'Config saved. Use CONNECT button in header next time.', 'success');
+      _bridgeRefreshAll();
     } else {
       _wizSetMsg('wizSaveMsg', data.error || 'Save failed.', 'error');
     }
@@ -2753,6 +3115,7 @@ async function _wizDoForget() {
     var data = await resp.json();
     if (resp.ok) {
       _wizSetMsg('wizSaveMsg', 'Saved config cleared.', '');
+      _bridgeRefreshAll();
     } else {
       _wizSetMsg('wizSaveMsg', data.error || 'Failed.', 'error');
     }
@@ -2761,25 +3124,26 @@ async function _wizDoForget() {
   }
 }
 
-// Update bridge button state from WS data
+// Update bridge header controls from WS data (called at 30 Hz)
+var _bridgeWsDebounce = null;
 function updateBridgeStatus(d) {
-  var $btn = document.getElementById('btnBridge');
-  var newText, connected;
-  if (d.lights_active && d.bridge_ip) {
-    newText = 'BRIDGE: ' + d.bridge_ip;
-    connected = true;
-  } else if (d.lights_active) {
-    newText = 'BRIDGE: ON';
-    connected = true;
-  } else {
-    newText = 'BRIDGE';
-    connected = false;
+  var connected = !!(d.lights_active && d.bridge_ip);
+  // Only do a full refresh when connection state actually changes, debounced
+  if (connected !== _bridgeUIState.connected) {
+    _bridgeUIState.connected = connected;
+    if (!_bridgeWsDebounce) {
+      _bridgeWsDebounce = setTimeout(function() {
+        _bridgeWsDebounce = null;
+        _bridgeRefreshAll();
+      }, 500);
+    }
+  } else if (connected) {
+    // Minor update: just keep IP label fresh
+    var $ip = document.getElementById('bridgeIpLabel');
+    var nLights = d.light_preview ? d.light_preview.length : 0;
+    var label = (d.bridge_ip || 'BRIDGE') + ' / ' + nLights + 'L';
+    if ($ip.textContent !== label) $ip.textContent = label;
   }
-  // Only touch DOM when value actually changed — avoids 30Hz text node
-  // recreation that swallows click events on the button text.
-  if ($btn.textContent !== newText) $btn.textContent = newText;
-  if (connected) { $btn.classList.add('connected'); }
-  else { $btn.classList.remove('connected'); }
 }
 
 // --- Hint bar system ---

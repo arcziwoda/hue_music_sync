@@ -707,11 +707,12 @@ async def websocket_endpoint(ws: WebSocket):
 
 @app.get("/api/bridge/status")
 async def bridge_status():
-    """Return current bridge connection status and saved config info."""
+    """Return current bridge connection status, saved config, and available areas."""
     connected = entertainment_ctrl is not None and entertainment_ctrl.is_connected
     num_lights = entertainment_ctrl._num_lights if entertainment_ctrl else 0
     has_saved = bool(_bridge_ip and _bridge_username and _bridge_clientkey)
-    return {
+
+    result = {
         "connected": connected,
         "bridge_ip": _bridge_ip if connected else None,
         "num_lights": num_lights,
@@ -720,6 +721,18 @@ async def bridge_status():
         "saved_bridge_ip": _bridge_ip if has_saved else None,
         "saved_area_id": _bridge_area_id if has_saved else None,
     }
+
+    # Include available areas when we have credentials (connected or saved)
+    if has_saved and _bridge_ip and _bridge_username:
+        try:
+            areas = await asyncio.get_event_loop().run_in_executor(
+                None, list_entertainment_areas, _bridge_ip, _bridge_username
+            )
+            result["areas"] = areas
+        except Exception:
+            result["areas"] = {}
+
+    return result
 
 
 @app.post("/api/bridge/discover")
