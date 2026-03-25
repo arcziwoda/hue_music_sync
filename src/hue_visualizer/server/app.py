@@ -361,18 +361,16 @@ _bridge_area_id: str | None = None
 async def audio_loop():
     """Background task: process audio, drive lights, broadcast to WebSocket clients.
 
-    Uses target-based timing (Task 0.7) to prevent drift from processing time.
-    Light send rate uses settings.fps_target (Task 0.2) for UDP oversampling.
+    Outer loop runs at fps_target (default 50 Hz) for light send rate.
+    WebSocket broadcasts are gated to WS_RATE_HZ (30 Hz) — UI doesn't need more.
     """
+    loop_interval = 1.0 / settings.fps_target if settings else 1.0 / 50
     ws_interval = 1.0 / WS_RATE_HZ
-    # Task 0.2: Use fps_target from config (default 50 Hz) instead of hardcoded 25 Hz.
-    # Oversampling at 50-60 Hz compensates for UDP packet loss; bridge decimates internally.
-    light_interval = 1.0 / settings.fps_target if settings else 1.0 / 50
     last_light_tick = time.monotonic()
+    last_ws_tick = time.monotonic()
 
     while True:
-        # Task 0.7: Target-based timing — compute next tick before processing
-        next_ws_tick = time.monotonic() + ws_interval
+        next_tick = time.monotonic() + loop_interval
 
         now = time.monotonic()
 
@@ -381,13 +379,13 @@ async def audio_loop():
             had_beat, beat_strength = pipeline.consume_beat()
             kick, snare, hihat, kick_e, snare_e, hihat_e = pipeline.consume_band_onsets()
 
-            # Task 0.5: Consume peak-held features for this output tick
             output_features = pipeline.consume_features()
 
-            # --- Effect engine tick (always, for preview + optional light output) ---
+            # --- Effect engine tick (every iteration = fps_target Hz) ---
             dt_light = now - last_light_tick
-            if effect_engine and dt_light >= light_interval:
-                last_light_tick = now
+            last_light_tick = now
+
+            if effect_engine and dt_light > 0:
 
                 beat_for_engine = BeatInfo(
                     is_beat=had_beat,
@@ -415,8 +413,10 @@ async def audio_loop():
                 except Exception as e:
                     logger.error(f"Light control error: {e}")
 
-            # --- WebSocket broadcast ---
-            if had_frames and manager.active:
+            # --- WebSocket broadcast (gated to 30 Hz) ---
+            dt_ws = now - last_ws_tick
+            if had_frames and manager.active and dt_ws >= ws_interval:
+                last_ws_tick = now
                 f = output_features
                 b = pipeline.beat_info
 
@@ -486,8 +486,7 @@ async def audio_loop():
 
                 await manager.broadcast(json.dumps(data))
 
-        # Task 0.7: Sleep only the remaining time until next tick
-        sleep_time = next_ws_tick - time.monotonic()
+        sleep_time = next_tick - time.monotonic()
         await asyncio.sleep(max(0, sleep_time))
 
 
