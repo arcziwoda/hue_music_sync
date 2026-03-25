@@ -7,6 +7,7 @@ from collections import deque
 from typing import Optional
 
 import numpy as np
+from scipy.signal import butter, sosfilt, sosfilt_zi
 
 if sys.platform == "win32":
     try:
@@ -24,6 +25,10 @@ logger = logging.getLogger(__name__)
 FORMAT = pyaudio.paInt16
 DTYPE = np.int16
 MAX_INT16 = 32768.0  # For normalization to [-1.0, 1.0]
+
+# Downsample high sample rates (192kHz, 96kHz) to keep FFT resolution usable.
+# At 192kHz with FFT 2048, sub_bass gets 1 bin instead of 3 — decimation fixes this.
+MAX_ANALYSIS_RATE = 48000
 
 
 class AudioCapture:
@@ -51,7 +56,13 @@ class AudioCapture:
         self._running = False
         self._device_channels = 1
         self._device_rate = sample_rate
+        self._native_device_rate = sample_rate
         self._last_error: Optional[str] = None
+
+        # Decimation state (initialized in start() when device rate is known)
+        self._decimation_factor = 1
+        self._decimate_sos: Optional[np.ndarray] = None
+        self._decimate_zi: Optional[np.ndarray] = None
 
         # Ring buffer of normalized float32 frames
         self._frames: deque[np.ndarray] = deque(maxlen=max_queue_size)
@@ -82,21 +93,42 @@ class AudioCapture:
 
         # Use device's native sample rate in WASAPI shared mode to avoid
         # sample rate conversion failures (e.g. DDJ-FLX4 runs at 48kHz)
-        self._device_rate = device_rate
+        self._native_device_rate = device_rate
+
+        # Decimation: downsample high rates (192kHz, 96kHz) for better FFT resolution
+        self._decimation_factor = max(1, device_rate // MAX_ANALYSIS_RATE)
+        if self._decimation_factor >= 2:
+            self._device_rate = device_rate // self._decimation_factor
+            # Butterworth lowpass anti-aliasing filter (cutoff at new Nyquist)
+            nyq_ratio = 1.0 / self._decimation_factor
+            self._decimate_sos = butter(8, 0.8 * nyq_ratio, output='sos')
+            self._decimate_zi = sosfilt_zi(self._decimate_sos) * 0.0
+            logger.info(
+                f"Decimating {device_rate}Hz -> {self._device_rate}Hz "
+                f"(factor {self._decimation_factor})"
+            )
+        else:
+            self._device_rate = device_rate
+            self._decimate_sos = None
+            self._decimate_zi = None
+
+        # Read more samples from device so output frames are always buffer_size after decimation
+        capture_buffer = self.buffer_size * self._decimation_factor
 
         logger.info(
-            f"Opening stream: {self._device_channels}ch @ {self._device_rate}Hz, "
-            f"buffer={self.buffer_size}"
+            f"Opening stream: {self._device_channels}ch @ {device_rate}Hz, "
+            f"buffer={capture_buffer}"
+            + (f", analysis_rate={self._device_rate}Hz" if self._decimation_factor >= 2 else "")
         )
 
         try:
             self._stream = self._pa.open(
                 format=FORMAT,
                 channels=self._device_channels,
-                rate=self._device_rate,
+                rate=self._native_device_rate,
                 input=True,
                 input_device_index=self.device_index,
-                frames_per_buffer=self.buffer_size,
+                frames_per_buffer=capture_buffer,
             )
         except Exception as e:
             self._cleanup_pa()
@@ -240,16 +272,24 @@ class AudioCapture:
     def _capture_loop(self) -> None:
         """Background thread: read audio frames continuously."""
         stereo = self._device_channels == 2
+        capture_chunk = self.buffer_size * self._decimation_factor
         consecutive_errors = 0
         max_errors = 10
         while self._running:
             try:
-                raw = self._stream.read(self.buffer_size, exception_on_overflow=False)
+                raw = self._stream.read(capture_chunk, exception_on_overflow=False)
                 samples = np.frombuffer(raw, dtype=DTYPE).astype(np.float32) / MAX_INT16
 
                 if stereo:
                     # Downmix stereo to mono: average L and R channels
                     samples = samples.reshape(-1, 2).mean(axis=1)
+
+                # Decimate: anti-alias filter + downsample
+                if self._decimate_sos is not None and self._decimate_zi is not None:
+                    samples, self._decimate_zi = sosfilt(
+                        self._decimate_sos, samples, zi=self._decimate_zi
+                    )
+                    samples = samples[:: self._decimation_factor]
 
                 with self._lock:
                     self._frames.append(samples)

@@ -35,6 +35,7 @@ dependencies = [
     "websockets>=16.0",
     "pystray>=0.19; sys_platform != 'linux'",
     "pillow>=10.0; sys_platform != 'linux'",
+    "scipy>=1.17.1",
 ]
 
 [project.urls]
