@@ -10,16 +10,19 @@ Real-time music visualization for Philips Hue lights. Analyzes audio via FFT and
 
 ## Features
 
-- **Real-time beat detection** — adaptive threshold with PLL-based BPM tracking and predictive triggering to compensate for system latency
-- **7-band FFT analysis** — spectral decomposition with Mel filterbank, driving per-frequency color and brightness mapping
-- **Hybrid visualization engine** — blends a slow generative layer (hue rotation + breathing) with a fast reactive layer based on audio energy
-- **Genre presets** — tuned parameter sets for techno, house, drum & bass, ambient, and more
-- **Spatial light mapping** — distribute frequencies across lights with uniform, frequency zones, wave, mirror, and chase modes
-- **Strobe system** — beat-synced strobing with auto-trigger on drops, safety-limited to 3 Hz
-- **Section awareness** — detects drops, buildups, and breakdowns to modulate intensity automatically
-- **Web control panel** — dark-themed UI with real-time spectrum/waveform visualization, all parameters adjustable live
+- **Beat detection** — adaptive threshold with PLL-based BPM tracking, per-band onset separation (kick/snare/hi-hat), and predictive triggering to compensate for system latency
+- **7-band FFT analysis** — spectral decomposition with Mel filterbank, per-frequency brightness and color mapping in spatial modes
+- **Hybrid visualization engine** — blends a slow generative layer (hue rotation + BPM-synced breathing) with a fast reactive layer based on audio energy
+- **Genre presets** — tuned parameter sets for techno, house, drum & bass, and ambient
+- **Spatial light mapping** — distribute frequencies across lights with uniform, frequency zones, wave, mirror, chase, and alternating modes
+- **Strobe system** — auto-triggers on detected drops, with manual burst control and safe mode (2 Hz cap)
+- **Section awareness** — detects drops, buildups, breakdowns, and sustains to modulate intensity and trigger effects automatically
+- **Palette system** — curated genre palettes + algorithmic generation (complementary, triadic, analogous)
+- **Intensity & effects size** — three intensity levels (intense/normal/chill) and adjustable effects spread across lights
+- **Calibration mode** — visual beat alignment with adjustable latency compensation
+- **Web control panel** — dark-themed UI with real-time spectrum visualization, genre/spatial/palette controls, and live light preview
 - **Audio-only mode** — works without a Hue Bridge for development and preview (WebSocket-driven light preview in browser)
-- **Cross-platform** — macOS (PyAudio) and Windows (WASAPI loopback via PyAudioWPatch), with standalone desktop builds for both
+- **Cross-platform** — macOS (PyAudio) and Windows (WASAPI loopback via PyAudioWPatch), with standalone desktop builds and auto-update
 
 ## Downloads
 
